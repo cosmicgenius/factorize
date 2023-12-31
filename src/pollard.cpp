@@ -1,4 +1,4 @@
-// main.cpp
+// pollard.cpp
 
 #include "../include/util.hpp"
 #include <chrono>
