@@ -6,6 +6,8 @@
 #include "../include/sieve_handler.hpp"
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
+#include <ctime>
 #include <gmpxx.h>
 #include <iostream>
 #include <vector>
@@ -113,6 +115,7 @@ void SieveHandler::InitSievers() {
 }
 
 bool SieveHandler::Sieve() {
+    std::srand(time(NULL)); // for quick and dirty rand that does not need to be uniform
     for (Siever &siever : this->sievers_) {
         siever.SievePolynomialGroup();
     }
@@ -137,8 +140,10 @@ mpz_class SieveHandler::TryExtractDivisor() {
         }
         matrix_data.push_back(res_vec);
     }
-    
+
+    std::vector<bool> redundant(cols, false);
     gf2::Matrix kernel = gf2::nullspace(gf2::Matrix{cols, rows, matrix_data});
+    std::cout << "kernel.cols=" << kernel.cols << std::endl;
     for (const std::vector<gf2::Word> &vec : kernel.data) {
         // lhs is the value that comes as a product of squares
         // rhs is the square produced from multipyling smooth values
@@ -172,10 +177,30 @@ mpz_class SieveHandler::TryExtractDivisor() {
 
         mpz_class g = gcd(abs(lhs_numer_rt - lhs_denom_rt * rhs_rt), this->N_);
 
+        std::cout << "g=" << g << std::endl;
         if (g > 1 && g < this->N_) {
             return g;
         }
+
+        // Pick the last SieveResult and mark it as redundant if g is trivial
+        // (last is faster due to current Gaussian elimination to find nullspace)
+        // These redundancies will be deleted later
+        for (int res_idx = cols - 1; res_idx >= 0; res_idx--) {
+            if ((vec[res_idx / gf2::BLOCK] & (gf2::Word(1) << (res_idx % gf2::BLOCK)))
+                && !redundant[res_idx]) {
+                redundant[res_idx] = true;
+            }
+        }
     }
+
+    // All of the linear dependencies returned trivial divisors
+    for (int res_idx = cols - 1; res_idx >= 0; res_idx--) {
+        if (redundant[res_idx]) {
+            std::swap(this->sieve_results_[res_idx], this->sieve_results_.back());
+            this->sieve_results_.pop_back();
+        }
+    }
+
     return 1;
 }
 

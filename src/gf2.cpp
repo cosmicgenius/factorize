@@ -51,7 +51,8 @@ gf2::Matrix gf2::transpose(const gf2::Matrix &matrix) {
 }
 
 // See https://www.cs.umd.edu/~gasarch/TOPICS/factoring/fastgauss.pdf
-// for the algorithm, except transposed
+// for the algorithm (Gaussian Elimination), except transposed
+// It's basically this https://en.wikipedia.org/wiki/Kernel_(linear_algebra)#Computation_by_Gaussian_elimination
 //
 // The algorithm transposes so that we can quickly xor rows
 gf2::Matrix gf2::nullspace(const gf2::Matrix &matrix) {

@@ -66,7 +66,7 @@ mpz_class find_nontrivial_factor(const mpz_class &N) {
 
     SieveHandler sieve_handler(N);
 
-    std::cout << "Initialization step" << std::endl;
+    std::cout << "Initializing basic bounds" << std::endl;
     
     sieve_handler.InitHeuristics();
 
@@ -87,7 +87,6 @@ mpz_class find_nontrivial_factor(const mpz_class &N) {
     sieve_handler.InitSievers();
 
     size_t prev_num_res = 0, cur_num_res = 0;
-    bool done = false;
     
     // Stores number of results from the past LOOK_BEHIND
     // poly groups to give an average number of results being
@@ -95,42 +94,48 @@ mpz_class find_nontrivial_factor(const mpz_class &N) {
     std::vector<uint32_t> look_behind_num_res;
     uint32_t look_behind_diff = 0;
 
-    for (uint32_t polygroup = 0; !done; polygroup++) {
-        done = sieve_handler.Sieve();
-        cur_num_res = sieve_handler.get_sieve_results_size_();
-        look_behind_diff = cur_num_res;
+    uint32_t polygroup = 0;
+    mpz_class d = 1; 
+    
+    while (d == 1) {
+        bool done = false;
+        std::cout << "Sieving..." << std::endl;
+        for (; !done; polygroup++) {
+            done = sieve_handler.Sieve();
+            cur_num_res = sieve_handler.get_sieve_results_size_();
+            look_behind_diff = cur_num_res;
 
-        look_behind_num_res.push_back(cur_num_res);
-        if (look_behind_num_res.size() > LOOK_BEHIND) {
-            look_behind_diff -= look_behind_num_res[0];
-            look_behind_num_res.erase(look_behind_num_res.begin());
+            look_behind_num_res.push_back(cur_num_res);
+            if (look_behind_num_res.size() > LOOK_BEHIND) {
+                look_behind_diff -= look_behind_num_res[0];
+                look_behind_num_res.erase(look_behind_num_res.begin());
+            }
+
+            std::cout << std::fixed << std::setprecision(2);
+
+            std::cout << "Polygrp " << (polygroup + 1) << " with "
+                      << "num_critical=" << sieve_handler.get_num_critical_() << ": "
+                      << cur_num_res - prev_num_res
+                      << " new res, "
+                      << cur_num_res
+                      << " / "
+                      << sieve_handler.get_results_target_()
+                      << " total "
+                      << "(" << 1000.0 * cur_num_res / sieve_handler.get_results_target_() / 10.0 << "%)," 
+                      << " averaging " 
+                      << round(1000.0 * look_behind_diff / look_behind_num_res.size()) / 1000.0
+                      << " in the last few, "
+                      << sieve_handler.get_partial_sieve_results_size_()
+                      << " partials. " << '\r' << std::flush;
+            prev_num_res = cur_num_res;
         }
+        std::cout << std::endl;
+        std::cout << "Trying to extract a divisor" << std::endl;
 
-        std::cout << std::fixed << std::setprecision(2);
-
-        std::cout << "Polygrp " << (polygroup + 1) << " with "
-                  << "num_critical=" << sieve_handler.get_num_critical_() << ": "
-                  << cur_num_res - prev_num_res
-                  << " new res, "
-                  << cur_num_res
-                  << " / "
-                  << sieve_handler.get_results_target_()
-                  << " total "
-                  << "(" << 1000.0 * cur_num_res / sieve_handler.get_results_target_() / 10.0 << "%)," 
-                  << " averaging " 
-                  << round(1000.0 * look_behind_diff / look_behind_num_res.size()) / 1000.0
-                  << " in the last few, "
-                  << sieve_handler.get_partial_sieve_results_size_()
-                  << " partials. " << '\r' << std::flush;
-        prev_num_res = cur_num_res;
+        d = sieve_handler.TryExtractDivisor();
     }
-    std::cout << std::endl;
-    std::cout << "Trying to extract a divisor" << std::endl;
 
-    mpz_class d = sieve_handler.TryExtractDivisor();
-    if (d != 1) std::cout << "Found nontrivial divisor d=" << d << std::endl;
-
-    return d;
+    std::cout << "Found nontrivial divisor d=" << d << std::endl; return d;
 }
 
 int main() {
