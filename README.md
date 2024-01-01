@@ -11,7 +11,11 @@ make
 ```bash
 bear -- make
 ```
-Run
+Run:
 ```bash
 make run
+```
+Test (basic util and gf2 functions):
+```bash
+make test
 ```
