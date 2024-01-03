@@ -20,10 +20,12 @@ const double LOG2 = 0.69314718056;
 
 // heuristically obtained 
 const double BASE_SIZE_MULTIPLIER = 0.105;
-const double SIEVE_RADIUS_POWER = 1.5;
+const double SIEVE_RADIUS_POWER = 1.25;
 const double SIEVE_RADIUS_MULTIPLIER = 0.7;
 
-const uint32_t A_FACTOR_TARGET = 3000;
+const double PARTIAL_MULTIPLIER = 2'000;
+
+const uint32_t A_FACTOR_TARGET = 3'000;
 
 //const uint32_t THREADS = 1;
 
@@ -58,7 +60,7 @@ void SieveHandler::InitHeuristics() {
 
     this->base_size_ = (uint32_t)this->factor_base_.size();
     this->sieve_radius_ = (uint32_t)(pow(this->base_size_, SIEVE_RADIUS_POWER) * SIEVE_RADIUS_MULTIPLIER);
-    this->partial_prime_bound_ = (uint32_t)(100 * prime_bound);
+    this->partial_prime_bound_ = (uint32_t)(PARTIAL_MULTIPLIER * prime_bound);
 
     this->result_target_ = this->base_size_ + uint32_t(ln_n);
 
