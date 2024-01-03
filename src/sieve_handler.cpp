@@ -4,12 +4,16 @@
 #include "../include/siever.hpp"
 #include "../include/gf2.hpp"
 #include "../include/sieve_handler.hpp"
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <ctime>
 #include <gmpxx.h>
 #include <iostream>
+#include <numeric>
+#include <set>
+#include <unordered_map>
 #include <vector>
 
 const double LOG2 = 0.69314718056;
@@ -26,6 +30,8 @@ const uint32_t A_FACTOR_TARGET = 3000;
 SieveHandler::SieveHandler(mpz_class N) : N_(N) {}
 
 void SieveHandler::InitHeuristics() {
+    std::srand(time(NULL)); // for quick and dirty rand that does not need to be uniform
+                            //
     // heuristically obtained approximate base size
     double ln_n = std::log(this->N_.get_d());
     double approx_base_size = exp(sqrt(ln_n * std::log(ln_n) * BASE_SIZE_MULTIPLIER));
@@ -115,7 +121,6 @@ void SieveHandler::InitSievers() {
 }
 
 bool SieveHandler::Sieve() {
-    std::srand(time(NULL)); // for quick and dirty rand that does not need to be uniform
     for (Siever &siever : this->sievers_) {
         siever.SievePolynomialGroup();
     }
@@ -123,27 +128,103 @@ bool SieveHandler::Sieve() {
     return this->sieve_results_.size() > this->result_target_;
 }
 
-mpz_class SieveHandler::TryExtractDivisor() {
-    const size_t cols = this->sieve_results_.size(), rows = this->base_size_ + 1;
+void SieveHandler::GenerateMatrix() {
+    std::set<uint32_t> relevant_fb_idx_set, relevant_res_idx_set;
+    for (uint32_t fb_idx = 0; fb_idx < this->base_size_; fb_idx++) 
+        relevant_fb_idx_set.insert(fb_idx);
+
+    for (uint32_t res_idx = 0; res_idx < this->sieve_results_.size(); res_idx++) 
+        relevant_res_idx_set.insert(res_idx);
+
+    // Prune, repeatedly removing any (result, prime) pair such that 
+    // that result is the only result to use that prime,
+    // also any prime that is used 0 times
+    while (true) {
+        // Number of times a prime is used (indexed by fb idx) 
+        // and its first user (indexed by res idx) if one exists
+        std::unordered_map<uint32_t, uint32_t> times_used;
+
+        // Check times used
+        for (const uint32_t &rel_res_idx : relevant_res_idx_set) {
+            const SieveResult &result = this->sieve_results_[rel_res_idx];
+            for (const uint32_t &fb_idx : result.prime_fb_idxs) {
+                times_used[fb_idx]++;
+            }
+        }
+
+        // Remove all primes that appear <= 1 times.
+        // If there are no primes to remove, then we are done.
+        bool done = true;
+        for (std::set<uint32_t>::iterator it{relevant_fb_idx_set.begin()},
+                end{relevant_fb_idx_set.end()}; it != end;) {
+            if (times_used[*it] <= 1) {
+                it = relevant_fb_idx_set.erase(it);
+                done = false;
+            } else {
+                it++;
+            }
+        }
+        if (done) break;
+
+        // If a result uses a prime that appears <= 1 time (i.e. == 1 time),
+        // then it should be discarded
+        for (std::set<uint32_t>::iterator it{relevant_res_idx_set.begin()},
+                end{relevant_res_idx_set.end()}; it != end;) {
+            const SieveResult &result = sieve_results_[*it];
+            bool to_delete = false;
+            for (const uint32_t &fb_idx : result.prime_fb_idxs) {
+                if (times_used[fb_idx] <= 1) {
+                    to_delete = true;
+                    break;
+                }
+            }
+            if (to_delete) {
+                it = relevant_res_idx_set.erase(it);
+            } else {
+                it++;
+            }
+        }
+    }
+
+    // Get index of fb_idx in relevant_fb_idxs_
+    std::unordered_map<uint32_t, uint32_t> fb_idx_rev;
+
+    uint32_t idx = 0;
+    for (const uint32_t &fb_idx : relevant_fb_idx_set) {
+        fb_idx_rev[fb_idx] = idx++;
+    }
+
+    const size_t cols = relevant_res_idx_set.size(), 
+                 rows = relevant_fb_idx_set.size() + 1;
     std::vector<std::vector<gf2::Word>> matrix_data;
     matrix_data.reserve(cols);
 
-    // TODO: (repeatedly) prune this array for results that are the only 
-    // ones to use a certain prime?
-    for (const SieveResult &result : this->sieve_results_) {
+    // Generate matrix
+    for (const uint32_t &rel_res_idx : relevant_res_idx_set) {
+        const SieveResult &result = this->sieve_results_[rel_res_idx];
         std::vector<gf2::Word> res_vec(rows / gf2::BLOCK + (rows % gf2::BLOCK!= 0), 0);
         if (result.sgn) res_vec[0] |= 1; // Set first bit to 1 for the prime ``-1''
 
         for (const uint32_t &fb_idx : result.prime_fb_idxs) {
-            const uint32_t q = (fb_idx + 1) / gf2::BLOCK, r = (fb_idx + 1) % gf2::BLOCK;
+            const uint32_t true_idx = fb_idx_rev[fb_idx];
+            const uint32_t q = (true_idx + 1) / gf2::BLOCK, r = (true_idx + 1) % gf2::BLOCK;
             res_vec[q] ^= (gf2::Word(1) << r);
         }
         matrix_data.push_back(res_vec);
     }
 
+    this->results_matrix_ = gf2::Matrix{cols, rows, matrix_data};
+
+    // Convert to vector for easy indexing into
+    //this->relevant_fb_idxs_ = std::vector<uint32_t>(relevant_fb_idx_set.begin(), relevant_fb_idx_set.end());
+    this->relevant_res_idxs_ = std::vector<uint32_t>(relevant_res_idx_set.begin(), relevant_res_idx_set.end());
+}
+
+mpz_class SieveHandler::TryExtractDivisor() {
+    const size_t cols = this->results_matrix_.cols;
     std::vector<bool> redundant(cols, false);
-    gf2::Matrix kernel = gf2::nullspace(gf2::Matrix{cols, rows, matrix_data});
-    std::cout << "kernel.cols=" << kernel.cols << std::endl;
+    gf2::Matrix kernel = gf2::nullspace(this->results_matrix_);
+
     for (const std::vector<gf2::Word> &vec : kernel.data) {
         // lhs is the value that comes as a product of squares
         // rhs is the square produced from multipyling smooth values
@@ -152,10 +233,10 @@ mpz_class SieveHandler::TryExtractDivisor() {
         bool rhs_sgn = false;
         std::vector<uint32_t> prime_exp(this->base_size_, 0);
 
-        for (uint32_t res_idx = 0; res_idx < cols; res_idx++) {
-            if (vec[res_idx / gf2::BLOCK] & (gf2::Word(1) << (res_idx % gf2::BLOCK))) {
+        for (uint32_t idx = 0; idx < cols; idx++) {
+            if (vec[idx / gf2::BLOCK] & (gf2::Word(1) << (idx % gf2::BLOCK))) {
                 // Result should be a part of the product
-                const SieveResult &result = this->sieve_results_[res_idx];
+                const SieveResult &result = this->sieve_results_[this->relevant_res_idxs_[idx]];
 
                 lhs_numer_rt *= result.numer;
                 lhs_denom_rt *= result.denom;
@@ -176,6 +257,9 @@ mpz_class SieveHandler::TryExtractDivisor() {
         rhs_rt %= this->N_;
 
         mpz_class g = gcd(abs(lhs_numer_rt - lhs_denom_rt * rhs_rt), this->N_);
+
+        //if ((lhs_numer_rt * lhs_numer_rt % N_ - lhs_denom_rt * lhs_denom_rt * rhs_rt * rhs_rt % N_ + N_) % N_ != 0)
+        //    std::cout << "BAD squares unequal" << std::endl;
 
         std::cout << "g=" << g << std::endl;
         if (g > 1 && g < this->N_) {
@@ -216,3 +300,6 @@ uint32_t SieveHandler::get_num_noncritical_() const { return this->num_noncritic
 size_t SieveHandler::get_sieve_results_size_() const { return this->sieve_results_.size(); }
 size_t SieveHandler::get_partial_sieve_results_size_() const { return this->partial_sieve_results_.size(); }
 
+std::pair<size_t, size_t> SieveHandler::get_matrix_dim() const { 
+    return {this->results_matrix_.cols, this->results_matrix_.rows}; 
+}

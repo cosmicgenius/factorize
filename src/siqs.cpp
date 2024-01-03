@@ -130,9 +130,19 @@ mpz_class find_nontrivial_factor(const mpz_class &N) {
             prev_num_res = cur_num_res;
         }
         std::cout << std::endl;
-        std::cout << "Trying to extract a divisor" << std::endl;
+        std::cout << "Stopping sieving after finding " << cur_num_res << " > " 
+                  << sieve_handler.get_results_target_() << " results" << std::endl;
+        std::cout << "Generating matrix" << std::endl;
+
+        sieve_handler.GenerateMatrix();
+        std::pair<size_t, size_t> matrix_dim = sieve_handler.get_matrix_dim();
+
+        std::cout << "Generated matrix with " << matrix_dim.first << " results and " 
+                  << matrix_dim.second << " primes. Trying to extract a divisor" << std::endl;
 
         d = sieve_handler.TryExtractDivisor();
+
+        if (d == 1) std::cout << "Failed to find a nontrivial divisor. Restarting" << std::endl;
     }
 
     std::cout << "Found nontrivial divisor d=" << d << std::endl; return d;

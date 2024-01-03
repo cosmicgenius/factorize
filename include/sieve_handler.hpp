@@ -34,6 +34,19 @@ private:
     std::vector<SieveResult> sieve_results_;
     std::unordered_map<uint32_t, SieveResult> partial_sieve_results_;
 
+    // Columns correspond to results,
+    // rows correspond to primes, with the entry
+    // corresponding to whether the prime appears an odd 
+    // number of times in the prime factorization of the 
+    // smooth result
+    gf2::Matrix results_matrix_;
+
+    // Matrix indices after pruning
+    //std::vector<uint32_t> relevant_fb_idxs_; // does not actually need to be stored 
+    //                                            because the SieveResult struct stores 
+    //                                            actual fb indices
+    std::vector<uint32_t> relevant_res_idxs_;
+
     std::vector<Siever> sievers_;
 
 public:
@@ -51,6 +64,7 @@ public:
     // Returns if sieving has produced enough results
     bool Sieve();
 
+    void GenerateMatrix();
     mpz_class TryExtractDivisor();
 
     uint32_t get_base_size_() const;
@@ -64,6 +78,8 @@ public:
 
     size_t get_sieve_results_size_() const;
     size_t get_partial_sieve_results_size_() const;
+
+    std::pair<size_t, size_t> get_matrix_dim() const;
 };
 
 #endif // SIEVE_HANDLER_HPP_
