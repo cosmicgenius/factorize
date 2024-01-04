@@ -1,5 +1,5 @@
 CC = g++
-CFLAGS = -pedantic -Wall -Wextra -lgmp -lgmpxx -g -O3
+CFLAGS = -pedantic -Wall -Wextra -lgmp -lgmpxx -g -O3 -pg
 
 siqs: obj/siqs.o obj/sieve_handler.o obj/siever.o obj/util.o obj/gf2.o
 	$(CC) -o build/main obj/siqs.o obj/sieve_handler.o obj/siever.o obj/util.o obj/gf2.o $(CFLAGS)

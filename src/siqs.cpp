@@ -149,19 +149,17 @@ mpz_class find_nontrivial_factor(const mpz_class &N) {
 }
 
 int main() {
-    while (true) {
-        std::cout << "n: ";
+    std::cout << "n: ";
 
-        std::string n_str;
-        std::cin >> n_str;
-        mpz_class n(n_str);
+    std::string n_str;
+    std::cin >> n_str;
+    mpz_class n(n_str);
 
-        clock_t tStart = clock();
-        util::print_prime_fact(n, [](const mpz_class &b) { return find_nontrivial_factor(b); });
+    clock_t tStart = clock();
+    util::print_prime_fact(n, [](const mpz_class &b) { return find_nontrivial_factor(b); });
 
-        std::cout << "Time taken: " << std::fixed << std::setprecision(3)
-                  << (double)(clock() - tStart) / CLOCKS_PER_SEC << "s"
-                  << std::endl;
-    }
+    std::cout << "Time taken: " << std::fixed << std::setprecision(3)
+              << (double)(clock() - tStart) / CLOCKS_PER_SEC << "s"
+              << std::endl;
 }
 

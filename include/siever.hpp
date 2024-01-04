@@ -106,6 +106,12 @@ private:
     // Sieves polynomial for smooth values 
     void SievePoly();
 
+    void SetHeights();
+    void CheckHeights();
+    void CheckSmoothness(mpz_class &polyval, std::vector<uint32_t> &prime_fb_idxs);
+    void InsertPartial(const uint32_t partial, const bool sgn,
+            const mpz_class &rt, const std::vector<uint32_t> &prime_fb_idxs);
+
 public:
     explicit Siever(const mpz_class &N, const mpz_class &a_target, 
             const uint32_t &base_size, const uint32_t &sieve_radius, const uint32_t &large_prime_bound, 

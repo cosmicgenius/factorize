@@ -231,7 +231,7 @@ void Siever::InitNextPoly() {
     this->poly_++;
 }
 
-void Siever::SievePoly() {
+void Siever::SetHeights() {
     std::fill(this->sieve_height_.begin(), this->sieve_height_.end(), 0);
     uint32_t sieve_diameter = 2 * this->sieve_radius_;
 
@@ -259,6 +259,10 @@ void Siever::SievePoly() {
             }
         }
     }
+}
+
+void Siever::CheckHeights() {
+    uint32_t sieve_diameter = 2 * this->sieve_radius_;
 
     // Check results
     // We have (ax+b) ** 2 - N = a(a x ** 2 + 2b x + c) for the integer c = (b ** 2 - N) / a
@@ -275,31 +279,8 @@ void Siever::SievePoly() {
             mpz_class polyval = this->a_ * x_int * x_int + this->b_ * x_int * 2 + c;
             bool sgn = polyval < 0;
 
-            // Remove the ``-1'' prime
-            polyval = abs(polyval);
+            CheckSmoothness(polyval, prime_fb_idxs);
 
-            // TODO: the original implementation in cosmicgenius/algorithm
-            // trial divides twice, first to check for smoothness, then to 
-            // actually get primes, presumably because there are too many 
-            // false positives/unpaired partials and constructing the 
-            // vector for these is wasteful. Is this justified?
-            for (uint32_t fb_idx = 0; fb_idx < this->base_size_; fb_idx++) {
-                const PrimeSize &p = this->factor_base_[fb_idx];
-                // this is slightly inefficient 
-                // (should be possible to simultaneously check for divisibility
-                // and get the quotient if divisible), but we are dividing 
-                // like ~ 10 times, so does it really matter?
-                //
-                // TODO: verify the above
-                bool divisible = (polyval % p == 0);
-                while (divisible) {
-                    polyval /= p;
-                    prime_fb_idxs.push_back(fb_idx);
-                    divisible = (polyval % p == 0);
-                }
-
-                if (polyval == 1) break;
-            }
             if (polyval == 1) {
                 this->sieve_results_.emplace_back(std::move(rt), 1, sgn, std::move(prime_fb_idxs));
             } else if (polyval.fits_uint_p()
@@ -310,40 +291,78 @@ void Siever::SievePoly() {
                 // bigger than the factor base primes, so anything that small will either be smooth 
                 // or prime
                 uint32_t partial = polyval.get_si();
-
-                std::unordered_map<uint32_t, SieveResult>::const_iterator partial_res_pr = 
-                    this->partial_sieve_results_.find(partial);
-                if (partial_res_pr != this->partial_sieve_results_.end()) {
-                    const SieveResult& res = partial_res_pr->second;
-
-                    std::vector<PrimeSize> combined_fb_idx(res.prime_fb_idxs.begin(), res.prime_fb_idxs.end());
-                    combined_fb_idx.reserve(prime_fb_idxs.size() + res.prime_fb_idxs.size());
-
-                    // No point moving primitives
-                    combined_fb_idx.insert(combined_fb_idx.end(), prime_fb_idxs.begin(), prime_fb_idxs.end());
-
-                    // Merge the two prime lists
-
-                    // Combine the two partial results into one of the form 
-                    // (rt1 * rt2) ** 2 = partial ** 2 * (something smooth) mod N
-                    //
-                    // TODO: check whether it is good to mod this product by N
-                    this->sieve_results_.emplace_back(res.numer * rt, mpz_class(partial), 
-                            sgn ^ res.sgn, std::move(combined_fb_idx));
-
-                    // The other partial result (the one stored in the map) can be kept
-                    // because e1 + e2, e1 + e3, ..., e1 + en forms a basis for 
-                    // (e1 + e2 + ... + en) perp over GF(2)n 
-                } else {
-                    this->partial_sieve_results_.emplace(partial, 
-                            SieveResult(std::move(rt), 1, sgn, std::move(prime_fb_idxs)));
-                }
+                
+                InsertPartial(partial, sgn, rt, prime_fb_idxs);
             } 
             /*else {
                 std::cout << "rejected abs(" << polyval << ") > " << this->partial_prime_bound_ << std::endl;
             }*/
         }
     }
+}
+void Siever::CheckSmoothness(mpz_class &polyval, std::vector<uint32_t> &prime_fb_idxs) {
+    // Remove the ``-1'' prime
+    polyval = abs(polyval);
+
+    // TODO: the original implementation in cosmicgenius/algorithm
+    // trial divides twice, first to check for smoothness, then to 
+    // actually get primes, presumably because there are too many 
+    // false positives/unpaired partials and constructing the 
+    // vector for these is wasteful. Is this justified?
+    for (uint32_t fb_idx = 0; fb_idx < this->base_size_; fb_idx++) {
+        const PrimeSize &p = this->factor_base_[fb_idx];
+        // this is slightly inefficient 
+        // (should be possible to simultaneously check for divisibility
+        // and get the quotient if divisible), but we are dividing 
+        // like ~ 10 times, so does it really matter?
+        //
+        // TODO: verify the above
+        bool divisible = (polyval % p == 0);
+        while (divisible) {
+            polyval /= p;
+            prime_fb_idxs.push_back(fb_idx);
+            divisible = (polyval % p == 0);
+        }
+
+        if (polyval == 1) break;
+    }
+}
+
+void Siever::InsertPartial(const uint32_t partial, const bool sgn,
+        const mpz_class &rt, const std::vector<uint32_t> &prime_fb_idxs) {
+    std::unordered_map<uint32_t, SieveResult>::const_iterator partial_res_pr = 
+        this->partial_sieve_results_.find(partial);
+    if (partial_res_pr != this->partial_sieve_results_.end()) {
+        const SieveResult& res = partial_res_pr->second;
+
+        std::vector<PrimeSize> combined_fb_idx(res.prime_fb_idxs.begin(), res.prime_fb_idxs.end());
+        combined_fb_idx.reserve(prime_fb_idxs.size() + res.prime_fb_idxs.size());
+
+        // No point moving primitives
+        combined_fb_idx.insert(combined_fb_idx.end(), prime_fb_idxs.begin(), prime_fb_idxs.end());
+
+        // Merge the two prime lists
+
+        // Combine the two partial results into one of the form 
+        // (rt1 * rt2) ** 2 = partial ** 2 * (something smooth) mod N
+        //
+        // TODO: check whether it is good to mod this product by N
+        this->sieve_results_.emplace_back(res.numer * rt, mpz_class(partial), 
+                sgn ^ res.sgn, std::move(combined_fb_idx));
+
+        // The other partial result (the one stored in the map) can be kept
+        // because e1 + e2, e1 + e3, ..., e1 + en forms a basis for 
+        // (e1 + e2 + ... + en) perp over GF(2)n 
+    } else {
+        this->partial_sieve_results_.emplace(partial, 
+                SieveResult(std::move(rt), 1, sgn, std::move(prime_fb_idxs)));
+    }
+}
+
+
+void Siever::SievePoly() {
+    SetHeights();
+    CheckHeights();
 }
 
 void Siever::SievePolynomialGroup() {

@@ -5,3 +5,7 @@ compile_commands.json
 # build and object 
 build/
 obj/
+
+# profiling
+prof/
+gmon.out
