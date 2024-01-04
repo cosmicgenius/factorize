@@ -20,8 +20,8 @@ const double LOG2 = 0.69314718056;
 
 // heuristically obtained 
 const double BASE_SIZE_MULTIPLIER = 0.105;
-const double SIEVE_RADIUS_POWER = 1.25;
-const double SIEVE_RADIUS_MULTIPLIER = 0.7;
+const double SIEVE_RADIUS_POWER = 1.15;
+const double SIEVE_RADIUS_MULTIPLIER = 2;
 
 const double PARTIAL_MULTIPLIER = 2'000;
 

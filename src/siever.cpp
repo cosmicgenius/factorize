@@ -12,8 +12,18 @@
 #include <unordered_map>
 #include <vector>
 
-// TODO: does this denom optimization even help?
 
+// See https://www.mersenneforum.org/showthread.php?t=7212#post99513
+// the idea is that tiny primes are quite wasteful, and contribute mostly uniform heights
+// (~ TINY_PRIME_PADDING) at least to smooth values
+// and thus can be ignored
+//
+// Ok turns out this is mostly useless because what it really does 
+// is a tiny SetHeights speed up and combined with more large prime forgiveness
+const PrimeSize TINY_PRIME_BOUND = 2;
+const double TINY_PRIME_PADDING = 1.5;
+
+// TODO: does this denom optimization even help?
 SieveResult::SieveResult(const mpz_class &&numer, const mpz_class &&denom, 
         const bool sgn, const std::vector<uint32_t> &&prime_fb_idxs) 
     : numer(std::move(numer)), denom(std::move(denom)), sgn(sgn), prime_fb_idxs(std::move(prime_fb_idxs)) {}
@@ -61,8 +71,10 @@ Siever::Siever(const mpz_class &N, const mpz_class &a_target,
         double logpoly = std::log(std::abs(
                     a_d * (double(x) - sieve_radius) * (double(x) - sieve_radius) - N_over_a_d
                 ));
-        if (logpoly > log_partial_prime_bound) {
-            this->sieve_height_target_[x] = LogType((logpoly - log_partial_prime_bound) * LOG_PRECISION);
+        if (logpoly > log_partial_prime_bound + TINY_PRIME_PADDING) {
+            this->sieve_height_target_[x] = LogType(
+                    (logpoly - log_partial_prime_bound - TINY_PRIME_PADDING)
+                * LOG_PRECISION);
         }
     }
 }
@@ -123,7 +135,8 @@ done:
     // get noncritical indexes by testing each for membership in critical_fb_idxs
     // this is slow but num_critical ~ 10, so it doesn't really matter
     for (uint32_t fb_idx = 0; fb_idx < this->base_size_; fb_idx++) {
-        if (this->critical_fb_idxs_.find(fb_idx) == this->critical_fb_idxs_.end()) {
+        if (this->factor_base_[fb_idx] > TINY_PRIME_BOUND &&
+                this->critical_fb_idxs_.find(fb_idx) == this->critical_fb_idxs_.end()) {
             this->noncritical_fb_idxs_.push_back(fb_idx);
         }
     }
@@ -133,7 +146,7 @@ void Siever::InitCriticalDeltas() {
     uint32_t crt_idx = 0;
     this->crt_indicator_ = std::vector<mpz_class>(this->num_critical_, 0);
     for (const uint32_t &critical_fb_idx : this->critical_fb_idxs_) {
-        const PrimeSize &p = this->factor_base_[critical_fb_idx];
+        const PrimeSize p = this->factor_base_[critical_fb_idx];
         mpz_class product_others = this->a_ / p;
 
         // The idea is that product_others * gamma will be a square root 
@@ -151,8 +164,8 @@ void Siever::InitCriticalDeltas() {
 
     // idx indexes over noncritical primes
     for (uint32_t idx = 0; idx < this->num_noncritical_; idx++) {
-        const uint32_t &noncritical_fb_idx = this->noncritical_fb_idxs_[idx];
-        const PrimeSize &q = this->factor_base_[noncritical_fb_idx];
+        const uint32_t noncritical_fb_idx = this->noncritical_fb_idxs_[idx];
+        const PrimeSize q = this->factor_base_[noncritical_fb_idx];
 
         this->a_inv_[idx] = 
             util::modular_inv_mod_prime(mpz_class(this->a_ % q).get_ui(), q);
@@ -174,9 +187,9 @@ void Siever::InitNextPoly() {
         }
         uint32_t idx = 0;
         this->soln_ = std::vector<std::pair<PrimeSize, PrimeSize>>(this->num_noncritical_);
-        for (const uint32_t &noncritical_fb_idx : this->noncritical_fb_idxs_) {
-            const PrimeSize &q = this->factor_base_[noncritical_fb_idx];
-            const mpz_class rt = this->fb_nsqrt_[noncritical_fb_idx];
+        for (const uint32_t noncritical_fb_idx : this->noncritical_fb_idxs_) {
+            const PrimeSize q = this->factor_base_[noncritical_fb_idx];
+            const mpz_class &rt = this->fb_nsqrt_[noncritical_fb_idx];
             //const LogType &logq = this->fb_logp_[noncritical_fb_idx];
             this->soln_[idx].first = mpz_class(
                     (((-rt - this->b_ % q) * this->a_inv_[idx] + this->sieve_radius_) % q + q) % q
@@ -213,8 +226,8 @@ void Siever::InitNextPoly() {
     }
 
     uint32_t idx = 0;
-    for (const uint32_t &noncritical_fb_idx : this->noncritical_fb_idxs_) {
-        const PrimeSize &q = this->factor_base_[noncritical_fb_idx];
+    for (const uint32_t noncritical_fb_idx : this->noncritical_fb_idxs_) {
+        const PrimeSize q = this->factor_base_[noncritical_fb_idx];
         if (gray_code_indicator % 2 == 0) {
             this->soln_[idx].first  = 
                 (this->soln_[idx].first  + this->soln_delta_[idx][nu]) % q;
@@ -237,26 +250,18 @@ void Siever::SetHeights() {
 
     // Sieve
     for (uint32_t idx = 0; idx < this->num_noncritical_; idx++) {
-        const uint32_t &noncritical_fb_idx = this->noncritical_fb_idxs_[idx];
-        const uint32_t &q = this->factor_base_[noncritical_fb_idx];
+        const uint32_t noncritical_fb_idx = this->noncritical_fb_idxs_[idx];
+        const uint32_t q = this->factor_base_[noncritical_fb_idx];
         const LogType &logq = this->fb_logp_[noncritical_fb_idx];
 
-        // 2 is a special case because there is only ever one square root mod 2
-        if (q == 2) {
-            uint32_t soln = this->soln_[idx].first;
+        // We assume that q = 2 is taken care of by the tiny prime bound
+        const std::pair<PrimeSize, PrimeSize> &solns = this->soln_[idx];
 
-            for (uint32_t x = soln; x <= sieve_diameter; x += q) {
-                this->sieve_height_[x] += logq;
-            }
-        } else {
-            const std::pair<PrimeSize, PrimeSize> &solns = this->soln_[idx];
-
-            for (uint32_t x = solns.first; x <= sieve_diameter; x += q) {
-                this->sieve_height_[x] += logq;
-            }
-            for (uint32_t x = solns.second; x <= sieve_diameter; x += q) {
-                this->sieve_height_[x] += logq;
-            }
+        for (uint32_t x = solns.first; x <= sieve_diameter; x += q) {
+            this->sieve_height_[x] += logq;
+        }
+        for (uint32_t x = solns.second; x <= sieve_diameter; x += q) {
+            this->sieve_height_[x] += logq;
         }
     }
 }
@@ -269,7 +274,7 @@ void Siever::CheckHeights() {
     // We also calculate rt = ax + b for extracting the final square equality mod N
     mpz_class c = (this->b_ * this->b_ - this->N_) / this->a_;
     for (uint32_t x = 0; x <= sieve_diameter; x++) {
-        if (this->sieve_height_[x] > this->sieve_height_target_[x] - 100) {
+        if (this->sieve_height_[x] > this->sieve_height_target_[x]) {
             // list of fb indices for primes dividing (ax+b) ** 2 - N, so by default, 
             // it should contain all of the critical primes 
             std::vector<uint32_t> prime_fb_idxs(critical_fb_idxs_.begin(), critical_fb_idxs_.end());
@@ -279,7 +284,7 @@ void Siever::CheckHeights() {
             mpz_class polyval = this->a_ * x_int * x_int + this->b_ * x_int * 2 + c;
             bool sgn = polyval < 0;
 
-            CheckSmoothness(polyval, prime_fb_idxs);
+            CheckSmoothness(x, polyval, prime_fb_idxs);
 
             if (polyval == 1) {
                 this->sieve_results_.emplace_back(std::move(rt), 1, sgn, std::move(prime_fb_idxs));
@@ -300,7 +305,7 @@ void Siever::CheckHeights() {
         }
     }
 }
-void Siever::CheckSmoothness(mpz_class &polyval, std::vector<uint32_t> &prime_fb_idxs) {
+void Siever::CheckSmoothness(const int32_t x, mpz_class &polyval, std::vector<uint32_t> &prime_fb_idxs) {
     // Remove the ``-1'' prime
     polyval = abs(polyval);
 
@@ -309,21 +314,54 @@ void Siever::CheckSmoothness(mpz_class &polyval, std::vector<uint32_t> &prime_fb
     // actually get primes, presumably because there are too many 
     // false positives/unpaired partials and constructing the 
     // vector for these is wasteful. Is this justified?
+    
+    // this is slightly inefficient 
+    // (should be possible to simultaneously check for divisibility
+    // and get the quotient if divisible), but we are dividing 
+    // like ~ 10 times, so does it really matter?
+    //
+    // TODO: verify the above
+
+    // Three separate checks for tiny primes, critical primes, and noncritical primes
     for (uint32_t fb_idx = 0; fb_idx < this->base_size_; fb_idx++) {
-        const PrimeSize &p = this->factor_base_[fb_idx];
-        // this is slightly inefficient 
-        // (should be possible to simultaneously check for divisibility
-        // and get the quotient if divisible), but we are dividing 
-        // like ~ 10 times, so does it really matter?
-        //
-        // TODO: verify the above
+        const PrimeSize p = this->factor_base_[fb_idx];
+        if (p > TINY_PRIME_BOUND) break;
+
         bool divisible = (polyval % p == 0);
+        while (divisible) {
+            //std::cout << "A" << p << " " << divisible << " " << polyval % p << std::endl;
+            polyval /= p;
+            prime_fb_idxs.push_back(fb_idx);
+            divisible = (polyval % p == 0);
+        }
+        if (polyval == 1) break;
+    }
+
+    for (const uint32_t &fb_idx : this->critical_fb_idxs_) {
+        const PrimeSize p = this->factor_base_[fb_idx];
+
+        bool divisible = (polyval % p == 0);
+        while (divisible) {
+            //std::cout << "B" << p << " " << divisible << " " << polyval % p << std::endl;
+            polyval /= p;
+            prime_fb_idxs.push_back(fb_idx);
+            divisible = (polyval % p == 0);
+        }
+        if (polyval == 1) break;
+    }
+
+    uint32_t idx = 0;
+    for (const uint32_t &fb_idx : this->noncritical_fb_idxs_) {
+        const PrimeSize p = this->factor_base_[fb_idx];
+        bool divisible = (std::abs(x - int32_t(this->soln_[idx].first )) % p == 0) ||
+                         (std::abs(x - int32_t(this->soln_[idx].second)) % p == 0);
         while (divisible) {
             polyval /= p;
             prime_fb_idxs.push_back(fb_idx);
             divisible = (polyval % p == 0);
         }
 
+        idx++;
         if (polyval == 1) break;
     }
 }

@@ -108,7 +108,7 @@ private:
 
     void SetHeights();
     void CheckHeights();
-    void CheckSmoothness(mpz_class &polyval, std::vector<uint32_t> &prime_fb_idxs);
+    void CheckSmoothness(const int32_t x, mpz_class &polyval, std::vector<uint32_t> &prime_fb_idxs);
     void InsertPartial(const uint32_t partial, const bool sgn,
             const mpz_class &rt, const std::vector<uint32_t> &prime_fb_idxs);
 
