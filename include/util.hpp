@@ -37,10 +37,10 @@ uint32_t square_root_modulo_prime(const mpz_class &n, const uint32_t &p);
 void print_prime_fact(const mpz_class &n,
               const std::function<mpz_class(const mpz_class &)> &&find_nontrivial_factor);
 
-// Finds a ** -1 mod p.
-// Assumes that p is prime. The use of int32_t instead of uint32_t is
+// Finds a ** -1 mod m.
+// Assumes that gcd(a, m) = 1. The use of int32_t instead of uint32_t is
 // to allow use of Extended Euclidean algorithm.
-int32_t modular_inv_mod_prime(const int32_t &a, const int32_t &p);
+int32_t modular_inv(const int32_t &a, const int32_t &m);
 
 
 } // namespace util

@@ -20,7 +20,7 @@ const double LOG2 = 0.69314718056;
 
 // heuristically obtained 
 const double BASE_SIZE_MULTIPLIER = 0.105;
-const double SIEVE_RADIUS_POWER = 1.25;
+const double SIEVE_RADIUS_POWER = 1.15;
 const double SIEVE_RADIUS_MULTIPLIER = 0.7;
 
 const double PARTIAL_MULTIPLIER = 2'000;
@@ -60,7 +60,7 @@ void SieveHandler::InitHeuristics() {
 
     this->base_size_ = (uint32_t)this->factor_base_.size();
     this->sieve_radius_ = (uint32_t)(pow(this->base_size_, SIEVE_RADIUS_POWER) * SIEVE_RADIUS_MULTIPLIER);
-    this->partial_prime_bound_ = (uint32_t)(PARTIAL_MULTIPLIER * prime_bound);
+    this->large_prime_bound_ = (uint32_t)(PARTIAL_MULTIPLIER * prime_bound);
 
     this->result_target_ = this->base_size_ + uint32_t(ln_n);
 
@@ -75,7 +75,7 @@ PrimeSize SieveHandler::CheckSmallPrimes() {
 }
 
 void SieveHandler::PrecomputePrimeFunctions() {
-    this->fb_nsqrt_ = std::vector<PrimeSize> (this->base_size_);
+    this->fb_nsqrt_ = std::vector<std::vector<PrimeSize>> (this->base_size_);
     this->fb_logp_ = std::vector<LogType> (this->base_size_);
 
     for (uint32_t i = 0; i < this->base_size_; i++) {
@@ -83,10 +83,52 @@ void SieveHandler::PrecomputePrimeFunctions() {
         this->fb_logp_[i] = LogType(std::log(double(p)) * LOG_PRECISION);
 
         try {
-          this->fb_nsqrt_[i] = util::square_root_modulo_prime(this->N_, p);
+            mpz_class R = util::square_root_modulo_prime(this->N_, p);
+            this->fb_nsqrt_[i].push_back(R.get_ui());
+
+            // 2 is a special case because (Z/2^n Z)^x is in general, 
+            // not cyclic, thus if R is a square 
+            // root modulo 2 ** e, then -R, R + 2 ** (e - 1), -R + 2 ** (e - 1) 
+            // are as well
+            if (p == 2) {
+                // N has square roots modulo 2 ** exp for exp >= 3 if and only 
+                // if it is 1 mod 8, so we should check this (along with mod 4)
+                if (this->N_ % 4 != 1) continue;
+                this->fb_nsqrt_[i].push_back(1);
+                if (this->N_ % 8 != 1) continue;
+                this->fb_nsqrt_[i].push_back(1);
+
+                // R is guaranteed to be a square root modulo 2 ** exp; we need 
+                // to lift it to 2 ** (exp + 1)
+                for (uint32_t exp = 3; uint32_t(1 << exp) < this->sieve_radius_; exp++) {
+                    // We correct the error of just using R as the square root
+                    // (More specifically, this is guaranteed to be an integer, we need to 
+                    // make it divisible by p). 
+                    mpz_class error = (this->N_ - R * R) >> exp;
+
+                    // error is wrong
+                    if (error % 2 == 1) {
+                        R += (1 << (exp - 1));
+                    }
+                    this->fb_nsqrt_[i].push_back(R.get_ui());
+                }
+            } else {
+                // R is guaranteed to be a square root modulo pow_p; we need 
+                // to lift it to pow_p * p
+                for (uint32_t pow_p = p; pow_p < 2 * sieve_radius_ / p; pow_p *= p) {
+                    // We correct the error of just using R as the square root
+                    // (More specifically, this is guaranteed to be an integer, we need to 
+                    // make it divisible by p). 
+                    mpz_class error = (this->N_ - R * R) / pow_p;
+                    
+                    // Need to shift the pow_p part by error / 2R mod p
+                    R += pow_p * (util::modular_inv(mpz_class((R << 1) % p).get_ui(), p) * error % p);
+                    this->fb_nsqrt_[i].push_back(R.get_ui());
+                }
+            }
         } catch (const std::domain_error &err) {
-          continue;
-        }
+            continue;
+        } 
     }
 }
 
@@ -115,8 +157,8 @@ void SieveHandler::InitSievers() {
 
     this->sievers_.reserve(1);
     this->sievers_.emplace_back(this->N_, a_target, this->base_size_,
-            this->sieve_radius_, this->partial_prime_bound_,
-            this->num_critical_, this->num_noncritical_, 
+            this->sieve_radius_, this->large_prime_bound_,
+            this->num_critical_,
             this->critical_fb_lower_, this->critical_fb_upper_, 
             this->factor_base_, this->fb_nsqrt_, this->fb_logp_,
             this->total_sieved_, this->sieve_results_, this->partial_sieve_results_);
@@ -292,7 +334,7 @@ mpz_class SieveHandler::TryExtractDivisor() {
 
 uint32_t SieveHandler::get_base_size_() const { return this->base_size_; }
 uint32_t SieveHandler::get_sieve_radius_() const { return this->sieve_radius_; }
-uint32_t SieveHandler::get_partial_prime_bound_() const { return this->partial_prime_bound_; }
+uint32_t SieveHandler::get_large_prime_bound_() const { return this->large_prime_bound_; }
 
 uint32_t SieveHandler::get_results_target_() const { return this->result_target_; }
 

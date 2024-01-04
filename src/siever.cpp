@@ -12,6 +12,8 @@
 #include <unordered_map>
 #include <vector>
 
+const double HEIGHT_FORGIVENESS = 1.5;
+
 // TODO: does this denom optimization even help?
 
 SieveResult::SieveResult(const mpz_class &&numer, const mpz_class &&denom, 
@@ -33,16 +35,16 @@ SieveResult::SieveResult(SieveResult &&rhs) noexcept {
 }
 
 Siever::Siever(const mpz_class &N, const mpz_class &a_target, 
-        const uint32_t &base_size, const uint32_t &sieve_radius, const uint32_t &partial_prime_bound,
-        const uint32_t &num_critical, const uint32_t &num_noncritical, 
+        const uint32_t &base_size, const uint32_t &sieve_radius, 
+        const uint32_t &partial_prime_bound, const uint32_t &num_critical, 
         const uint32_t &critical_fb_lower, const uint32_t &critical_fb_upper, 
         const std::vector<PrimeSize> &factor_base,
-        const std::vector<PrimeSize> &fb_nsqrt, const std::vector<LogType> &fb_logp,
+        const std::vector<std::vector<PrimeSize>> &fb_nsqrt, const std::vector<LogType> &fb_logp,
         uint32_t &total_sieved,
         std::vector<SieveResult> &sieve_results, std::unordered_map<uint32_t, SieveResult> &partial_sieve_results) :
         N_(N), a_target_(a_target), 
-        base_size_(base_size), sieve_radius_(sieve_radius), partial_prime_bound_(partial_prime_bound),
-        num_critical_(num_critical), num_noncritical_(num_noncritical),
+        base_size_(base_size), sieve_radius_(sieve_radius), 
+        partial_prime_bound_(partial_prime_bound), num_critical_(num_critical),
         critical_fb_lower_(critical_fb_lower), critical_fb_upper_(critical_fb_upper),
         factor_base_(factor_base), fb_nsqrt_(fb_nsqrt), fb_logp_(fb_logp),
         total_sieved_(total_sieved), 
@@ -62,7 +64,7 @@ Siever::Siever(const mpz_class &N, const mpz_class &a_target,
                     a_d * (double(x) - sieve_radius) * (double(x) - sieve_radius) - N_over_a_d
                 ));
         if (logpoly > log_partial_prime_bound) {
-            this->sieve_height_target_[x] = LogType((logpoly - log_partial_prime_bound) * LOG_PRECISION);
+            this->sieve_height_target_[x] = LogType((logpoly - log_partial_prime_bound - HEIGHT_FORGIVENESS) * LOG_PRECISION);
         }
     }
 }
@@ -118,15 +120,17 @@ void Siever::InitCriticalPrimes() {
         }
     }
 done:
-    this->noncritical_fb_idxs_.clear();
-    this->noncritical_fb_idxs_.reserve(this->num_noncritical_);
+    this->noncritical_idxs_.clear();
     // get noncritical indexes by testing each for membership in critical_fb_idxs
     // this is slow but num_critical ~ 10, so it doesn't really matter
     for (uint32_t fb_idx = 0; fb_idx < this->base_size_; fb_idx++) {
         if (this->critical_fb_idxs_.find(fb_idx) == this->critical_fb_idxs_.end()) {
-            this->noncritical_fb_idxs_.push_back(fb_idx);
+            // Inserts the correct number of copies of fb_idx to the end to signify all the 
+            // noncritical prime powers with this prime as their base
+            this->noncritical_idxs_.insert(this->noncritical_idxs_.end(), this->fb_nsqrt_[fb_idx].size(), fb_idx);
         }
     }
+    this->num_noncritical_ = this->noncritical_idxs_.size();
 }
 
 void Siever::InitCriticalDeltas() {
@@ -138,8 +142,8 @@ void Siever::InitCriticalDeltas() {
 
         // The idea is that product_others * gamma will be a square root 
         // of N mod p, but 0 mod all other critical primes.
-        uint32_t gamma = this->fb_nsqrt_[critical_fb_idx] 
-                * util::modular_inv_mod_prime(mpz_class(product_others % p).get_ui(), p) % p;
+        uint32_t gamma = this->fb_nsqrt_[critical_fb_idx][0]
+                * util::modular_inv(mpz_class(product_others % p).get_ui(), p) % p;
         if (gamma > p / 2) gamma = p - gamma;
 
         mpz_class indicator = product_others * gamma;
@@ -148,44 +152,65 @@ void Siever::InitCriticalDeltas() {
 
     this->a_inv_ = std::vector<PrimeSize>(this->num_noncritical_);
     this->soln_delta_ = std::vector<std::vector<PrimeSize>>(this->num_noncritical_);
-
-    // idx indexes over noncritical primes
+    
+    // idx indexes over noncritical primes powers
+    PrimeSize q = 0;
+    uint32_t pow_q = 1;
     for (uint32_t idx = 0; idx < this->num_noncritical_; idx++) {
-        const uint32_t &noncritical_fb_idx = this->noncritical_fb_idxs_[idx];
-        const PrimeSize &q = this->factor_base_[noncritical_fb_idx];
+        const uint32_t &noncritical_fb_idx = this->noncritical_idxs_[idx];
+        if (this->factor_base_[noncritical_fb_idx] != q) {
+            pow_q = 1;
+            q = this->factor_base_[noncritical_fb_idx];
+        } // else continue;
+        pow_q *= q;
 
-        this->a_inv_[idx] = 
-            util::modular_inv_mod_prime(mpz_class(this->a_ % q).get_ui(), q);
+        this->a_inv_[idx] = util::modular_inv(mpz_class(this->a_ % pow_q).get_ui(), pow_q);
         
         this->soln_delta_[idx].resize(this->num_critical_);
         for (crt_idx = 0; crt_idx < this->num_critical_; crt_idx++) {
-            uint64_t indicator_64 = mpz_class(this->crt_indicator_[crt_idx] % q).get_ui();
-            this->soln_delta_[idx][crt_idx] = (indicator_64 << 1) * this->a_inv_[idx] % q;
+            uint64_t indicator_64 = mpz_class(this->crt_indicator_[crt_idx] % pow_q).get_ui();
+            this->soln_delta_[idx][crt_idx] = (indicator_64 << 1) * this->a_inv_[idx] % pow_q;
         }   
     }
 }
 
-// All idx's index over the noncritical primes
+// All idx's index over the noncritical prime powers
 void Siever::InitNextPoly() {
     if (this->poly_ == 0) {
         this->b_ = 0;
         for (uint32_t crt_idx = 0; crt_idx < this->num_critical_; crt_idx++) {
             this->b_ += this->crt_indicator_[crt_idx];
         }
-        uint32_t idx = 0;
         this->soln_ = std::vector<std::pair<PrimeSize, PrimeSize>>(this->num_noncritical_);
-        for (const uint32_t &noncritical_fb_idx : this->noncritical_fb_idxs_) {
-            const PrimeSize &q = this->factor_base_[noncritical_fb_idx];
-            const mpz_class rt = this->fb_nsqrt_[noncritical_fb_idx];
-            //const LogType &logq = this->fb_logp_[noncritical_fb_idx];
-            this->soln_[idx].first = mpz_class(
-                    (((-rt - this->b_ % q) * this->a_inv_[idx] + this->sieve_radius_) % q + q) % q
+
+        // Noncritical prime power iteration
+        PrimeSize q = 0;
+        uint32_t pow_q = 1, exp = 0;
+        for (uint32_t idx = 0; idx < this->num_noncritical_; idx++) {
+            const uint32_t &noncritical_fb_idx = this->noncritical_idxs_[idx];
+            if (this->factor_base_[noncritical_fb_idx] != q) {
+                pow_q = 1;
+                exp = 0;
+                q = this->factor_base_[noncritical_fb_idx];
+            } // else continue;
+            pow_q *= q;
+            exp++;
+
+            uint32_t mod = pow_q;
+            // powers of 2 are special (4 solns in general); we will store just two mod pow_q / 2
+            // except 2 and 4, which don't have 4 solns, so can be handled normally
+            if (q == 2 && exp > 2) {
+                mod >>= 1;
+            }
+
+            mpz_class rt = this->fb_nsqrt_[noncritical_fb_idx][exp - 1];
+
+            this->soln_[idx].first  = mpz_class(
+                    (((-rt - this->b_ % mod) * this->a_inv_[idx] + this->sieve_radius_) % mod + mod) % mod
                 ).get_ui();
             this->soln_[idx].second = mpz_class(
-                    (((rt - this->b_ % q) * this->a_inv_[idx] + this->sieve_radius_) % q + q) % q
+                    (((+rt - this->b_ % mod) * this->a_inv_[idx] + this->sieve_radius_) % mod + mod) % mod
                 ).get_ui();
-            
-            idx++;
         }
 
         this->poly_++;
@@ -212,9 +237,21 @@ void Siever::InitNextPoly() {
         this->b_ += (this->crt_indicator_[nu] << 1);
     }
 
-    uint32_t idx = 0;
-    for (const uint32_t &noncritical_fb_idx : this->noncritical_fb_idxs_) {
-        const PrimeSize &q = this->factor_base_[noncritical_fb_idx];
+    // Noncritical prime power iteration
+    PrimeSize q = 0;
+    uint32_t pow_q = 1;
+    for (uint32_t idx = 0; idx < this->num_noncritical_; idx++) {
+        const uint32_t &noncritical_fb_idx = this->noncritical_idxs_[idx];
+        if (this->factor_base_[noncritical_fb_idx] != q) {
+            pow_q = 1;
+            q = this->factor_base_[noncritical_fb_idx];
+        } // else continue;
+        pow_q *= q;
+        // Again, 2 is special
+        uint32_t mod = pow_q;
+        if (q == 2 && pow_q > 4) {
+            mod >>= 1;
+        }
         if (gray_code_indicator % 2 == 0) {
             this->soln_[idx].first  = 
                 (this->soln_[idx].first  + this->soln_delta_[idx][nu]) % q;
@@ -226,7 +263,6 @@ void Siever::InitNextPoly() {
             this->soln_[idx].second = 
                 (this->soln_[idx].second + q - this->soln_delta_[idx][nu]) % q;
         }
-        idx++;
     }
     this->poly_++;
 }
@@ -236,25 +272,37 @@ void Siever::SievePoly() {
     uint32_t sieve_diameter = 2 * this->sieve_radius_;
 
     // Sieve
+    PrimeSize q = 0;
+    LogType logq = 0;
+    uint32_t pow_q = 1;
     for (uint32_t idx = 0; idx < this->num_noncritical_; idx++) {
-        const uint32_t &noncritical_fb_idx = this->noncritical_fb_idxs_[idx];
-        const uint32_t &q = this->factor_base_[noncritical_fb_idx];
-        const LogType &logq = this->fb_logp_[noncritical_fb_idx];
+        const uint32_t &noncritical_fb_idx = this->noncritical_idxs_[idx];
+        if (this->factor_base_[noncritical_fb_idx] != q) {
+            pow_q = 1;
+            q = this->factor_base_[noncritical_fb_idx];
+            logq = this->fb_logp_[noncritical_fb_idx];
+        } // else continue;
+        pow_q *= q;
 
-        // 2 is a special case because there is only ever one square root mod 2
-        if (q == 2) {
+        // 2 is special!
+        uint32_t mod = pow_q;
+        if (q == 2 && pow_q > 4) {
+            mod >>= 1;
+        }
+        // 2 only has one solution mod 2, so we take it as a special case
+        if (pow_q == 2) {
             uint32_t soln = this->soln_[idx].first;
 
-            for (uint32_t x = soln; x <= sieve_diameter; x += q) {
+            for (uint32_t x = soln; x <= sieve_diameter; x += mod) {
                 this->sieve_height_[x] += logq;
             }
         } else {
             const std::pair<PrimeSize, PrimeSize> &solns = this->soln_[idx];
 
-            for (uint32_t x = solns.first; x <= sieve_diameter; x += q) {
+            for (uint32_t x = solns.first; x <= sieve_diameter; x += mod) {
                 this->sieve_height_[x] += logq;
             }
-            for (uint32_t x = solns.second; x <= sieve_diameter; x += q) {
+            for (uint32_t x = solns.second; x <= sieve_diameter; x += mod) {
                 this->sieve_height_[x] += logq;
             }
         }
@@ -265,7 +313,7 @@ void Siever::SievePoly() {
     // We also calculate rt = ax + b for extracting the final square equality mod N
     mpz_class c = (this->b_ * this->b_ - this->N_) / this->a_;
     for (uint32_t x = 0; x <= sieve_diameter; x++) {
-        if (this->sieve_height_[x] > this->sieve_height_target_[x] - 100) {
+        if (this->sieve_height_[x] > this->sieve_height_target_[x]) {
             // list of fb indices for primes dividing (ax+b) ** 2 - N, so by default, 
             // it should contain all of the critical primes 
             std::vector<uint32_t> prime_fb_idxs(critical_fb_idxs_.begin(), critical_fb_idxs_.end());

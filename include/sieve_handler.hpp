@@ -14,13 +14,16 @@ private:
     const mpz_class N_;
     uint32_t base_size_; 
     uint32_t sieve_radius_;
-    uint32_t partial_prime_bound_; 
+    uint32_t large_prime_bound_; 
     uint32_t result_target_; 
 
     std::vector<PrimeSize> all_small_primes_;
     std::vector<PrimeSize> factor_base_;
-    // Store square root of N mod p and log(p) for each p based on fb index
-    std::vector<PrimeSize> fb_nsqrt_;
+    // Store a square root of N mod p ** e for each power of p 
+    // up to about sieve_radius_
+    std::vector<std::vector<PrimeSize>> fb_nsqrt_;
+
+    // Store log p
     std::vector<LogType> fb_logp_;
 
     uint32_t num_critical_;
@@ -69,7 +72,7 @@ public:
 
     uint32_t get_base_size_() const;
     uint32_t get_sieve_radius_() const;
-    uint32_t get_partial_prime_bound_() const;
+    uint32_t get_large_prime_bound_() const;
 
     uint32_t get_results_target_() const;
 

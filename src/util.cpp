@@ -266,8 +266,8 @@ void util::print_prime_fact(const mpz_class &n,
 }
 
 // Extended Euclidean Algorithm
-int32_t util::modular_inv_mod_prime(const int32_t &a, const int32_t &p) {
-    int u = mpz_class(a % p).get_ui(), v = p;
+int32_t util::modular_inv(const int32_t &a, const int32_t &m) {
+    int u = a % m, v = m;
     int x1 = 1, x2 = 0;
 
     while (u != 1) {
@@ -279,6 +279,6 @@ int32_t util::modular_inv_mod_prime(const int32_t &a, const int32_t &p) {
       x2 = x1;
       x1 = x;
     }
-    return (x1 + p) % p;
+    return (x1 + m) % m;
 }
 

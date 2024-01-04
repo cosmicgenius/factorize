@@ -72,7 +72,7 @@ mpz_class find_nontrivial_factor(const mpz_class &N) {
 
     std::cout << "base_size = " << sieve_handler.get_base_size_() << std::endl;
     std::cout << "sieve_radius = " << sieve_handler.get_sieve_radius_() << std::endl;
-    std::cout << "partial_prime_bound = " << sieve_handler.get_partial_prime_bound_() << std::endl;
+    std::cout << "large_prime_bound = " << sieve_handler.get_large_prime_bound_() << std::endl;
 
     uint32_t small_d = sieve_handler.CheckSmallPrimes();
     if (small_d != 1) {

@@ -48,12 +48,12 @@ private:
     const uint32_t partial_prime_bound_;
     
     const uint32_t num_critical_;
-    const uint32_t num_noncritical_;
+    uint32_t num_noncritical_;
     const uint32_t critical_fb_lower_;
     const uint32_t critical_fb_upper_;
 
     const std::vector<PrimeSize> &factor_base_;
-    const std::vector<PrimeSize> &fb_nsqrt_;
+    const std::vector<std::vector<PrimeSize>> &fb_nsqrt_;
     const std::vector<LogType> &fb_logp_;
 
     uint32_t &total_sieved_;
@@ -75,10 +75,13 @@ private:
     // These correspond to B_l in https://math.dartmouth.edu/~carlp/implementing.pdf
     std::vector<mpz_class> crt_indicator_;
 
-    std::vector<uint32_t> noncritical_fb_idxs_;
-    // For each noncritical prime q, store a ** -1, every possible 
+    // Stores fb_idx for noncritical prime powers
+    // Consecutive repeated fb_idxs mean prime powers (with consecutively increasing exponents)
+    // e.g. if fb = {2, 3, 5}, then 0, 0, 1, 2, 2, 2 means 2, 4, 3, 5, 25, 125 are noncritical prime powers
+    std::vector<uint32_t> noncritical_idxs_;
+    // For each noncritical prime power pow_q, store a ** -1, every possible 
     // value of 2 * crt_indicator * a ** -1 (to change solutions), and the two solutions 
-    // to (ax + b)^2 = N mod q
+    // to (ax + b)^2 = N mod pow_q
     std::vector<PrimeSize> a_inv_;
     std::vector<std::vector<PrimeSize>> soln_delta_;
     std::vector<std::pair<PrimeSize, PrimeSize>> soln_;
@@ -108,11 +111,11 @@ private:
 
 public:
     explicit Siever(const mpz_class &N, const mpz_class &a_target, 
-            const uint32_t &base_size, const uint32_t &sieve_radius, const uint32_t &large_prime_bound, 
-            const uint32_t &num_critical, const uint32_t &num_noncritical, 
+            const uint32_t &base_size, const uint32_t &sieve_radius, 
+            const uint32_t &large_prime_bound, const uint32_t &num_critical,
             const uint32_t &critical_fb_lower, const uint32_t &critical_fb_upper, 
             const std::vector<PrimeSize> &factor_base, 
-            const std::vector<PrimeSize> &fb_nsqrt, const std::vector<LogType> &fb_logp,
+            const std::vector<std::vector<PrimeSize>> &fb_nsqrt, const std::vector<LogType> &fb_logp,
             uint32_t &total_sieved,
             std::vector<SieveResult> &sieve_results, std::unordered_map<uint32_t, SieveResult> &partial_sieve_results_);
 
