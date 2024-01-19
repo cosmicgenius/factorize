@@ -5,6 +5,7 @@
 #include "../include/gf2.hpp"
 #include "../include/sieve_handler.hpp"
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -20,8 +21,8 @@ const double LOG2 = 0.69314718056;
 
 // heuristically obtained 
 const double BASE_SIZE_MULTIPLIER = 0.105;
-const double SIEVE_RADIUS_POWER = 1.15;
-const double SIEVE_RADIUS_MULTIPLIER = 2;
+const double SIEVE_RADIUS_POWER = 0.725;
+const double SIEVE_RADIUS_MULTIPLIER = 80;
 
 const double PARTIAL_MULTIPLIER = 2'000;
 
@@ -119,7 +120,8 @@ void SieveHandler::InitSievers() {
             this->num_critical_, this->num_noncritical_, 
             this->critical_fb_lower_, this->critical_fb_upper_, 
             this->factor_base_, this->fb_nsqrt_, this->fb_logp_,
-            this->total_sieved_, this->sieve_results_, this->partial_sieve_results_);
+            this->total_sieved_, this->sieve_results_, this->partial_sieve_results_,
+            this->timer_);
 }
 
 bool SieveHandler::Sieve() {
@@ -223,9 +225,16 @@ void SieveHandler::GenerateMatrix() {
 }
 
 mpz_class SieveHandler::TryExtractDivisor() {
+    std::chrono::system_clock::time_point tStart = std::chrono::system_clock::now();
+    
     const size_t cols = this->results_matrix_.cols;
     std::vector<bool> redundant(cols, false);
     gf2::Matrix kernel = gf2::nullspace(this->results_matrix_);
+
+    this->timer_.kernel_time += 
+        std::chrono::duration_cast<std::chrono::microseconds>
+        (std::chrono::system_clock::now() - tStart).count() 
+        / 1'000'000.0;
 
     for (const std::vector<gf2::Word> &vec : kernel.data) {
         // lhs is the value that comes as a product of squares
@@ -305,3 +314,5 @@ size_t SieveHandler::get_partial_sieve_results_size_() const { return this->part
 std::pair<size_t, size_t> SieveHandler::get_matrix_dim() const { 
     return {this->results_matrix_.cols, this->results_matrix_.rows}; 
 }
+
+Timer SieveHandler::get_timer_() const { return this->timer_; }

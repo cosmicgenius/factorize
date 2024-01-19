@@ -49,6 +49,8 @@ private:
 
     std::vector<Siever> sievers_;
 
+    Timer timer_;
+
 public:
     explicit SieveHandler(mpz_class N);
 
@@ -80,6 +82,8 @@ public:
     size_t get_partial_sieve_results_size_() const;
 
     std::pair<size_t, size_t> get_matrix_dim() const;
+
+    Timer get_timer_() const;
 };
 
 #endif // SIEVE_HANDLER_HPP_

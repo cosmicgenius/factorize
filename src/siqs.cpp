@@ -145,7 +145,15 @@ mpz_class find_nontrivial_factor(const mpz_class &N) {
         if (d == 1) std::cout << "Failed to find a nontrivial divisor. Restarting" << std::endl;
     }
 
-    std::cout << "Found nontrivial divisor d=" << d << std::endl; return d;
+    std::cout << "Found nontrivial divisor d=" << d << std::endl; 
+    Timer timer = sieve_handler.get_timer_();
+    std::cout << std::fixed << std::setprecision(3);
+    std::cout << "Polygrp init time: " << timer.init_grp_time << "s" << std::endl;
+    std::cout << "Single poly init time: " << timer.init_poly_time << "s" << std::endl;
+    std::cout << "Set heights time: " << timer.set_height_time << "s" << std::endl;
+    std::cout << "Check heights time: " << timer.check_time << "s" << std::endl;
+    std::cout << "Finding kernel time: " << timer.kernel_time << "s" << std::endl;
+    return d;
 }
 
 int main() {
@@ -158,7 +166,7 @@ int main() {
     clock_t tStart = clock();
     util::print_prime_fact(n, [](const mpz_class &b) { return find_nontrivial_factor(b); });
 
-    std::cout << "Time taken: " << std::fixed << std::setprecision(3)
+    std::cout << "Total time taken: " 
               << (double)(clock() - tStart) / CLOCKS_PER_SEC << "s"
               << std::endl;
 }

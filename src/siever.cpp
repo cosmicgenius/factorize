@@ -3,6 +3,8 @@
 #include "../include/util.hpp"
 #include "../include/siever.hpp"
 #include <algorithm>
+#include <bits/chrono.h>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <gmp.h>
@@ -21,7 +23,7 @@
 // Ok turns out this is mostly useless because what it really does 
 // is a tiny SetHeights speed up and combined with more large prime forgiveness
 const PrimeSize TINY_PRIME_BOUND = 2;
-const double TINY_PRIME_PADDING = 1.5;
+const double TINY_PRIME_PADDING = 2;
 
 // TODO: does this denom optimization even help?
 SieveResult::SieveResult(const mpz_class &&numer, const mpz_class &&denom, 
@@ -49,14 +51,16 @@ Siever::Siever(const mpz_class &N, const mpz_class &a_target,
         const std::vector<PrimeSize> &factor_base,
         const std::vector<PrimeSize> &fb_nsqrt, const std::vector<LogType> &fb_logp,
         uint32_t &total_sieved,
-        std::vector<SieveResult> &sieve_results, std::unordered_map<uint32_t, SieveResult> &partial_sieve_results) :
+        std::vector<SieveResult> &sieve_results, std::unordered_map<uint32_t, SieveResult> &partial_sieve_results,
+        Timer &timer) :
         N_(N), a_target_(a_target), 
         base_size_(base_size), sieve_radius_(sieve_radius), partial_prime_bound_(partial_prime_bound),
         num_critical_(num_critical), num_noncritical_(num_noncritical),
         critical_fb_lower_(critical_fb_lower), critical_fb_upper_(critical_fb_upper),
         factor_base_(factor_base), fb_nsqrt_(fb_nsqrt), fb_logp_(fb_logp),
         total_sieved_(total_sieved), 
-        sieve_results_(sieve_results), partial_sieve_results_(partial_sieve_results) {
+        sieve_results_(sieve_results), partial_sieve_results_(partial_sieve_results),
+        timer_(timer) {
     double a_d = a_target.get_d(),
            N_over_a_d = mpz_class(N / a_target).get_d();
 
@@ -305,6 +309,7 @@ void Siever::CheckHeights() {
         }
     }
 }
+
 void Siever::CheckSmoothness(const int32_t x, mpz_class &polyval, std::vector<uint32_t> &prime_fb_idxs) {
     // Remove the ``-1'' prime
     polyval = abs(polyval);
@@ -319,22 +324,31 @@ void Siever::CheckSmoothness(const int32_t x, mpz_class &polyval, std::vector<ui
     // (should be possible to simultaneously check for divisibility
     // and get the quotient if divisible), but we are dividing 
     // like ~ 10 times, so does it really matter?
-    //
-    // TODO: verify the above
+    
+    // This isn't faster
+    // Use raw c impl to be faster
+    // mpz_t n, q, _r, one;
+    // mpz_init(n);
+    // mpz_init(q);
+    // mpz_init(_r);
+    // mpz_init(one);
+    // uint32_t true_res;
+
+    // mpz_set(n, polyval.get_mpz_t());
+    // mpz_set_ui(one, 1);
 
     // Three separate checks for tiny primes, critical primes, and noncritical primes
     for (uint32_t fb_idx = 0; fb_idx < this->base_size_; fb_idx++) {
         const PrimeSize p = this->factor_base_[fb_idx];
         if (p > TINY_PRIME_BOUND) break;
-
+        
         bool divisible = (polyval % p == 0);
         while (divisible) {
-            //std::cout << "A" << p << " " << divisible << " " << polyval % p << std::endl;
             polyval /= p;
             prime_fb_idxs.push_back(fb_idx);
             divisible = (polyval % p == 0);
         }
-        if (polyval == 1) break;
+        if (polyval == 1) return;
     }
 
     for (const uint32_t &fb_idx : this->critical_fb_idxs_) {
@@ -342,12 +356,11 @@ void Siever::CheckSmoothness(const int32_t x, mpz_class &polyval, std::vector<ui
 
         bool divisible = (polyval % p == 0);
         while (divisible) {
-            //std::cout << "B" << p << " " << divisible << " " << polyval % p << std::endl;
             polyval /= p;
             prime_fb_idxs.push_back(fb_idx);
             divisible = (polyval % p == 0);
         }
-        if (polyval == 1) break;
+        if (polyval == 1) return;
     }
 
     uint32_t idx = 0;
@@ -355,14 +368,19 @@ void Siever::CheckSmoothness(const int32_t x, mpz_class &polyval, std::vector<ui
         const PrimeSize p = this->factor_base_[fb_idx];
         bool divisible = (std::abs(x - int32_t(this->soln_[idx].first )) % p == 0) ||
                          (std::abs(x - int32_t(this->soln_[idx].second)) % p == 0);
+        
+        // Outer check for divisibility
         while (divisible) {
+        // while (true_res == 0) {
+            // mpz_swap(n, q); 
             polyval /= p;
             prime_fb_idxs.push_back(fb_idx);
             divisible = (polyval % p == 0);
+            // true_res = mpz_fdiv_qr_ui(q, _r, n, p);
         }
-
+        if (polyval == 1) return;
+        // if (mpz_cmp(n, one) == 0) goto done_checking;
         idx++;
-        if (polyval == 1) break;
     }
 }
 
@@ -400,12 +418,30 @@ void Siever::InsertPartial(const uint32_t partial, const bool sgn,
 
 void Siever::SievePoly() {
     SetHeights();
+    this->timer_.set_height_time += UpdateTime();
     CheckHeights();
+    this->timer_.check_time += UpdateTime();
+}
+
+std::chrono::system_clock::time_point time() {
+    return std::chrono::system_clock::now();
+}
+
+double Siever::UpdateTime() {
+    std::chrono::system_clock::time_point time_now = time();
+    double res = 
+        std::chrono::duration_cast<std::chrono::microseconds>(time_now - this->time_prev_).count() 
+        / 1'000'000.0;
+    this->time_prev_ = time_now;
+
+    return res;
 }
 
 void Siever::SievePolynomialGroup() {
+    this->time_prev_ = time();
     InitCriticalPrimes();
     InitCriticalDeltas();
+    this->timer_.init_grp_time += UpdateTime();
 
     // We only need half of these since we do 
     // not need both -b and b
@@ -414,6 +450,7 @@ void Siever::SievePolynomialGroup() {
     for (this->poly_ = 0; this->poly_ < num_polys;) {
         //std::cout << "poly " << this->poly_ << std::endl;
         InitNextPoly();
+        this->timer_.init_poly_time += UpdateTime();
         SievePoly();
 
         this->total_sieved_++;

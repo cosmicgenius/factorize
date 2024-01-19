@@ -2,6 +2,7 @@
 #ifndef SIEVER_HPP_
 #define SIEVER_HPP_
 
+#include <chrono>
 #include <cstdint>
 #include <gmpxx.h>
 #include <unordered_map>
@@ -14,6 +15,15 @@ typedef uint32_t PrimeSize;
 // bits behind the point in a 16 bit integer.
 const uint16_t LOG_PRECISION = 1 << 6;
 typedef uint16_t LogType;
+
+struct Timer {
+    // We keep track of these times for prof
+    double init_grp_time = 0;
+    double init_poly_time = 0;
+    double set_height_time = 0;
+    double check_time = 0;
+    double kernel_time = 0;
+};
 
 // Result from sieving, where numer and denom are values such that 
 // such that (numer / denom) ** 2 = polyval mod N, and sgn and prime_fb_idxs
@@ -112,6 +122,12 @@ private:
     void InsertPartial(const uint32_t partial, const bool sgn,
             const mpz_class &rt, const std::vector<uint32_t> &prime_fb_idxs);
 
+    Timer &timer_;
+    std::chrono::system_clock::time_point time_prev_;
+
+    // Return time from now to time_prev_ and updates time_prev_
+    double UpdateTime();
+
 public:
     explicit Siever(const mpz_class &N, const mpz_class &a_target, 
             const uint32_t &base_size, const uint32_t &sieve_radius, const uint32_t &large_prime_bound, 
@@ -120,7 +136,8 @@ public:
             const std::vector<PrimeSize> &factor_base, 
             const std::vector<PrimeSize> &fb_nsqrt, const std::vector<LogType> &fb_logp,
             uint32_t &total_sieved,
-            std::vector<SieveResult> &sieve_results, std::unordered_map<uint32_t, SieveResult> &partial_sieve_results_);
+            std::vector<SieveResult> &sieve_results, std::unordered_map<uint32_t, SieveResult> &partial_sieve_results_,
+            Timer &timer);
 
     // Sieves an entire poly group (chosen randomly) for smooth values
     void SievePolynomialGroup();
