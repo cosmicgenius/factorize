@@ -3,6 +3,7 @@
 #include "../include/util.hpp"
 #include "../include/sieve_handler.hpp"
 #include <algorithm>
+#include <bits/chrono.h>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -16,7 +17,7 @@
 
 const uint32_t PRIMALITY_REPS = 40;
 const mpz_class POLLARD_CUTOFF = mpz_class(1) << 64;
-const uint32_t LOOK_BEHIND = 8;
+const uint32_t LOOK_BEHIND = 16;
 
 mpz_class mini_pollard(mpz_class N) {
     gmp_randclass rand_state (gmp_randinit_mt);
@@ -163,11 +164,13 @@ int main() {
     std::cin >> n_str;
     mpz_class n(n_str);
 
-    clock_t tStart = clock();
+    std::chrono::system_clock::time_point tStart = std::chrono::system_clock::now();
     util::print_prime_fact(n, [](const mpz_class &b) { return find_nontrivial_factor(b); });
 
     std::cout << "Total time taken: " 
-              << (double)(clock() - tStart) / CLOCKS_PER_SEC << "s"
+              << std::chrono::duration_cast<std::chrono::microseconds>
+                 (std::chrono::system_clock::now() - tStart).count() / 1'000'000.0
+              << "s"
               << std::endl;
 }
 
