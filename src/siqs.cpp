@@ -95,14 +95,14 @@ mpz_class find_nontrivial_factor(const mpz_class &N) {
     std::vector<uint32_t> look_behind_num_res;
     uint32_t look_behind_diff = 0;
 
-    uint32_t polygroup = 0;
     mpz_class d = 1; 
     
     while (d == 1) {
-        bool done = false;
         std::cout << "Sieving..." << std::endl;
-        for (; !done; polygroup++) {
-            done = sieve_handler.Sieve();
+
+        // A function that is run sequentially after 
+        // any polygroup finishes 
+        auto pretty_print = [&] (uint32_t polygroup) {
             cur_num_res = sieve_handler.get_sieve_results_size_();
             look_behind_diff = cur_num_res;
 
@@ -129,7 +129,10 @@ mpz_class find_nontrivial_factor(const mpz_class &N) {
                       << sieve_handler.get_partial_sieve_results_size_()
                       << " partials. " << '\r' << std::flush;
             prev_num_res = cur_num_res;
-        }
+        };
+
+        sieve_handler.Sieve(pretty_print);
+
         std::cout << std::endl;
         std::cout << "Stopping sieving after finding " << cur_num_res << " > " 
                   << sieve_handler.get_results_target_() << " results" << std::endl;

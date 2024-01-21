@@ -5,7 +5,10 @@
 #include "siever.hpp"
 #include "gf2.hpp"
 #include <cstdint>
+#include <functional>
 #include <gmpxx.h>
+#include <mutex>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -34,6 +37,8 @@ private:
     std::vector<SieveResult> sieve_results_;
     std::unordered_map<uint32_t, SieveResult> partial_sieve_results_;
 
+    std::mutex res_mutex_;
+
     // Columns correspond to results,
     // rows correspond to primes, with the entry
     // corresponding to whether the prime appears an odd 
@@ -47,8 +52,12 @@ private:
     //                                            actual fb indices
     std::vector<uint32_t> relevant_res_idxs_;
 
+    // Lists of sievers and threads where 
+    // thread i runs siever i
     std::vector<Siever> sievers_;
+    std::vector<std::thread> threads_;
 
+    uint32_t polygroup_ = 0;
     Timer timer_;
 
 public:
@@ -63,8 +72,11 @@ public:
     void PrecomputePrimeFunctions();
     void InitSievers();
 
-    // Returns if sieving has produced enough results
-    bool Sieve();
+    // Sieves until there are enough results
+    // Takes a void(uint32_t) function that runs with argument polygroup_ 
+    // every time a polygroup finishes sieving 
+    // (relevant for multithreaded sieving)
+    void Sieve(const std::function<void(uint32_t)> &on_finish_polygrp);
 
     void GenerateMatrix();
     mpz_class TryExtractDivisor();

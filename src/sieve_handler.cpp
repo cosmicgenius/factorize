@@ -10,8 +10,10 @@
 #include <cstdint>
 #include <cstdlib>
 #include <ctime>
+#include <functional>
 #include <gmpxx.h>
 #include <iostream>
+#include <mutex>
 #include <numeric>
 #include <set>
 #include <unordered_map>
@@ -28,7 +30,7 @@ const double PARTIAL_MULTIPLIER = 2'000;
 
 const uint32_t A_FACTOR_TARGET = 3'000;
 
-//const uint32_t THREADS = 1;
+const uint32_t THREADS = 8;
 
 SieveHandler::SieveHandler(mpz_class N) : N_(N) {}
 
@@ -114,22 +116,49 @@ void SieveHandler::InitSievers() {
 
     //std::cout << true_a_target << " " << this->critical_fb_lower_ << " " << this->critical_fb_upper_ << std::endl;
 
-    this->sievers_.reserve(1);
-    this->sievers_.emplace_back(this->N_, a_target, this->base_size_,
-            this->sieve_radius_, this->partial_prime_bound_,
-            this->num_critical_, this->num_noncritical_, 
-            this->critical_fb_lower_, this->critical_fb_upper_, 
-            this->factor_base_, this->fb_nsqrt_, this->fb_logp_,
-            this->total_sieved_, this->sieve_results_, this->partial_sieve_results_,
-            this->timer_);
+    this->sievers_.clear();
+    this->sievers_.reserve(THREADS);
+    
+    for (uint32_t t = 0; t < THREADS; t++) {
+        this->sievers_.emplace_back(this->N_, a_target, this->base_size_,
+                this->sieve_radius_, this->partial_prime_bound_,
+                this->num_critical_, this->num_noncritical_, 
+                this->critical_fb_lower_, this->critical_fb_upper_, 
+                this->factor_base_, this->fb_nsqrt_, this->fb_logp_,
+                this->total_sieved_, this->sieve_results_, this->partial_sieve_results_,
+                this->res_mutex_, this->timer_);
+    }
 }
 
-bool SieveHandler::Sieve() {
-    for (Siever &siever : this->sievers_) {
+void RunSiever(Siever &siever, std::mutex &res_mutex,
+        std::vector<SieveResult> &sieve_results, 
+        const uint32_t result_target, uint32_t &polygrp,
+        const std::function<void(uint32_t)> &on_finish_polygrp) {
+    bool done = false;
+    while (!done) {
         siever.SievePolynomialGroup();
+
+        std::lock_guard<std::mutex> res_lock(res_mutex);
+
+        siever.FlushResults();
+        done = (sieve_results.size() > result_target);
+
+        on_finish_polygrp(polygrp);
+        polygrp++;
+    }
+}
+
+void SieveHandler::Sieve(const std::function<void(uint32_t)> &on_finish_polygrp) {
+    this->threads_.clear();
+    this->threads_.reserve(THREADS);
+    for (uint32_t t = 0; t < THREADS; t++) {
+        this->threads_.push_back(std::thread(RunSiever, 
+                    std::ref(this->sievers_[t]), std::ref(this->res_mutex_), 
+                    std::ref(this->sieve_results_), this->result_target_,
+                    std::ref(this->polygroup_), std::cref(on_finish_polygrp)));
     }
 
-    return this->sieve_results_.size() > this->result_target_;
+    for (std::thread &thr : this->threads_) thr.join();
 }
 
 void SieveHandler::GenerateMatrix() {

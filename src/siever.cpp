@@ -10,6 +10,8 @@
 #include <gmp.h>
 #include <gmpxx.h>
 #include <iostream>
+#include <iterator>
+#include <mutex>
 #include <ostream>
 #include <unordered_map>
 #include <vector>
@@ -52,7 +54,7 @@ Siever::Siever(const mpz_class &N, const mpz_class &a_target,
         const std::vector<PrimeSize> &fb_nsqrt, const std::vector<LogType> &fb_logp,
         uint32_t &total_sieved,
         std::vector<SieveResult> &sieve_results, std::unordered_map<uint32_t, SieveResult> &partial_sieve_results,
-        Timer &timer) :
+        std::mutex &res_mutex, Timer &timer) :
         N_(N), a_target_(a_target), 
         base_size_(base_size), sieve_radius_(sieve_radius), partial_prime_bound_(partial_prime_bound),
         num_critical_(num_critical), num_noncritical_(num_noncritical),
@@ -60,7 +62,7 @@ Siever::Siever(const mpz_class &N, const mpz_class &a_target,
         factor_base_(factor_base), fb_nsqrt_(fb_nsqrt), fb_logp_(fb_logp),
         total_sieved_(total_sieved), 
         sieve_results_(sieve_results), partial_sieve_results_(partial_sieve_results),
-        timer_(timer) {
+        res_mutex_(res_mutex), timer_(timer) {
     double a_d = a_target.get_d(),
            N_over_a_d = mpz_class(N / a_target).get_d();
 
@@ -270,46 +272,6 @@ void Siever::SetHeights() {
     }
 }
 
-void Siever::CheckHeights() {
-    uint32_t sieve_diameter = 2 * this->sieve_radius_;
-
-    // Check results
-    // We have (ax+b) ** 2 - N = a(a x ** 2 + 2b x + c) for the integer c = (b ** 2 - N) / a
-    // We also calculate rt = ax + b for extracting the final square equality mod N
-    mpz_class c = (this->b_ * this->b_ - this->N_) / this->a_;
-    for (uint32_t x = 0; x <= sieve_diameter; x++) {
-        if (this->sieve_height_[x] > this->sieve_height_target_[x]) {
-            // list of fb indices for primes dividing (ax+b) ** 2 - N, so by default, 
-            // it should contain all of the critical primes 
-            std::vector<uint32_t> prime_fb_idxs(critical_fb_idxs_.begin(), critical_fb_idxs_.end());
-
-            int32_t x_int = int32_t(x) - this->sieve_radius_;
-            mpz_class rt = this->a_ * x_int + this->b_;
-            mpz_class polyval = this->a_ * x_int * x_int + this->b_ * x_int * 2 + c;
-            bool sgn = polyval < 0;
-
-            CheckSmoothness(x, polyval, prime_fb_idxs);
-
-            if (polyval == 1) {
-                this->sieve_results_.emplace_back(std::move(rt), 1, sgn, std::move(prime_fb_idxs));
-            } else if (polyval.fits_uint_p()
-                    && polyval.get_ui() <= this->partial_prime_bound_) {
-
-                // We don't check this, but all partials are going to be primes (or their negations),
-                // simply because our partial_prime_bound_ is not that much (only like 100x) 
-                // bigger than the factor base primes, so anything that small will either be smooth 
-                // or prime
-                uint32_t partial = polyval.get_si();
-                
-                InsertPartial(partial, sgn, rt, prime_fb_idxs);
-            } 
-            /*else {
-                std::cout << "rejected abs(" << polyval << ") > " << this->partial_prime_bound_ << std::endl;
-            }*/
-        }
-    }
-}
-
 void Siever::CheckSmoothness(const int32_t x, mpz_class &polyval, std::vector<uint32_t> &prime_fb_idxs) {
     // Remove the ``-1'' prime
     polyval = abs(polyval);
@@ -384,37 +346,83 @@ void Siever::CheckSmoothness(const int32_t x, mpz_class &polyval, std::vector<ui
     }
 }
 
-void Siever::InsertPartial(const uint32_t partial, const bool sgn,
+void InsertPartial(std::vector<SieveResult> &sieve_results, 
+        std::unordered_map<uint32_t, SieveResult> &partial_sieve_results,
+        const uint32_t partial, const bool sgn,
         const mpz_class &rt, const std::vector<uint32_t> &prime_fb_idxs) {
+
     std::unordered_map<uint32_t, SieveResult>::const_iterator partial_res_pr = 
-        this->partial_sieve_results_.find(partial);
-    if (partial_res_pr != this->partial_sieve_results_.end()) {
+        partial_sieve_results.find(partial);
+
+    // If there is already a partial, then merge the partials to create a 
+    // full result and add it 
+    if (partial_res_pr != partial_sieve_results.end()) {
         const SieveResult& res = partial_res_pr->second;
 
+        // Merge the two prime lists
         std::vector<PrimeSize> combined_fb_idx(res.prime_fb_idxs.begin(), res.prime_fb_idxs.end());
         combined_fb_idx.reserve(prime_fb_idxs.size() + res.prime_fb_idxs.size());
 
         // No point moving primitives
         combined_fb_idx.insert(combined_fb_idx.end(), prime_fb_idxs.begin(), prime_fb_idxs.end());
 
-        // Merge the two prime lists
 
         // Combine the two partial results into one of the form 
         // (rt1 * rt2) ** 2 = partial ** 2 * (something smooth) mod N
         //
         // TODO: check whether it is good to mod this product by N
-        this->sieve_results_.emplace_back(res.numer * rt, mpz_class(partial), 
+        sieve_results.emplace_back(res.numer * rt, mpz_class(partial), 
                 sgn ^ res.sgn, std::move(combined_fb_idx));
 
         // The other partial result (the one stored in the map) can be kept
         // because e1 + e2, e1 + e3, ..., e1 + en forms a basis for 
         // (e1 + e2 + ... + en) perp over GF(2)n 
     } else {
-        this->partial_sieve_results_.emplace(partial, 
+        partial_sieve_results.emplace(partial, 
                 SieveResult(std::move(rt), 1, sgn, std::move(prime_fb_idxs)));
     }
 }
 
+void Siever::CheckHeights() {
+    uint32_t sieve_diameter = 2 * this->sieve_radius_;
+
+    // Check results
+    // We have (ax+b) ** 2 - N = a(a x ** 2 + 2b x + c) for the integer c = (b ** 2 - N) / a
+    // We also calculate rt = ax + b for extracting the final square equality mod N
+    mpz_class c = (this->b_ * this->b_ - this->N_) / this->a_;
+    for (uint32_t x = 0; x <= sieve_diameter; x++) {
+        if (this->sieve_height_[x] > this->sieve_height_target_[x]) {
+            // list of fb indices for primes dividing (ax+b) ** 2 - N, so by default, 
+            // it should contain all of the critical primes 
+            std::vector<uint32_t> prime_fb_idxs(critical_fb_idxs_.begin(), critical_fb_idxs_.end());
+
+            int32_t x_int = int32_t(x) - this->sieve_radius_;
+            mpz_class rt = this->a_ * x_int + this->b_;
+            mpz_class polyval = this->a_ * x_int * x_int + this->b_ * x_int * 2 + c;
+            bool sgn = polyval < 0;
+
+            CheckSmoothness(x, polyval, prime_fb_idxs);
+
+            if (polyval == 1) {
+                this->temp_sieve_results_.emplace_back(std::move(rt), 1, sgn, std::move(prime_fb_idxs));
+            } else if (polyval.fits_uint_p()
+                    && polyval.get_ui() <= this->partial_prime_bound_) {
+
+                // We don't check this, but all partials are going to be primes (or their negations),
+                // simply because our partial_prime_bound_ is not that much (only like 100x) 
+                // bigger than the factor base primes, so anything that small will either be smooth 
+                // or prime
+                uint32_t partial = polyval.get_si();
+                
+                InsertPartial(this->temp_sieve_results_, this->temp_partial_sieve_results_, 
+                        partial, sgn, rt, prime_fb_idxs);
+            } 
+            /*else {
+                std::cout << "rejected abs(" << polyval << ") > " << this->partial_prime_bound_ << std::endl;
+            }*/
+        }
+    }
+}
 
 void Siever::SievePoly() {
     SetHeights();
@@ -455,4 +463,19 @@ void Siever::SievePolynomialGroup() {
 
         this->total_sieved_++;
     }
+}
+
+void Siever::FlushResults() {
+    std::move(this->temp_sieve_results_.begin(), this->temp_sieve_results_.end(),
+            std::back_inserter(this->sieve_results_));
+
+    for (const std::pair<const uint32_t, SieveResult> &partial_p : 
+            this->temp_partial_sieve_results_) {
+        InsertPartial(this->sieve_results_, this->partial_sieve_results_, 
+                partial_p.first, 
+                partial_p.second.sgn, partial_p.second.numer, partial_p.second.prime_fb_idxs);
+    }
+
+    this->temp_sieve_results_.clear();
+    this->temp_partial_sieve_results_.clear();
 }
