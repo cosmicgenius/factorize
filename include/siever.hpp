@@ -65,7 +65,7 @@ private:
     const uint32_t partial_prime_bound_;
     
     const uint32_t num_critical_;
-    const uint32_t num_noncritical_;
+    uint32_t num_noncritical_;
     const uint32_t critical_fb_lower_;
     const uint32_t critical_fb_upper_;
 
@@ -144,7 +144,7 @@ private:
 public:
     Siever(const mpz_class &N, const mpz_class &a_target, 
             const uint32_t &base_size, const uint32_t &sieve_radius, const uint32_t &large_prime_bound, 
-            const uint32_t &num_critical, const uint32_t &num_noncritical, 
+            const uint32_t &num_critical, //const uint32_t &num_noncritical, 
             const uint32_t &critical_fb_lower, const uint32_t &critical_fb_upper, 
             const std::vector<PrimeSize> &factor_base, 
             const std::vector<PrimeSize> &fb_nsqrt, const std::vector<LogType> &fb_logp,

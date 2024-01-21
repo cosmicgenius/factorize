@@ -27,7 +27,7 @@ private:
     std::vector<LogType> fb_logp_;
 
     uint32_t num_critical_;
-    uint32_t num_noncritical_;
+    //uint32_t num_noncritical_;
     
     uint32_t critical_fb_lower_;
     uint32_t critical_fb_upper_;
@@ -88,7 +88,7 @@ public:
     uint32_t get_results_target_() const;
 
     uint32_t get_num_critical_() const;
-    uint32_t get_num_noncritical_() const;
+    //uint32_t get_num_noncritical_() const;
 
     size_t get_sieve_results_size_() const;
     size_t get_partial_sieve_results_size_() const;

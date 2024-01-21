@@ -21,11 +21,8 @@
 // the idea is that tiny primes are quite wasteful, and contribute mostly uniform heights
 // (~ TINY_PRIME_PADDING) at least to smooth values
 // and thus can be ignored
-//
-// Ok turns out this is mostly useless because what it really does 
-// is a tiny SetHeights speed up and combined with more large prime forgiveness
-const PrimeSize TINY_PRIME_BOUND = 2;
-const double TINY_PRIME_PADDING = 2;
+const PrimeSize TINY_PRIME_BOUND = 16;
+const double TINY_PRIME_PADDING = 6;
 
 // TODO: does this denom optimization even help?
 SieveResult::SieveResult(const mpz_class &&numer, const mpz_class &&denom, 
@@ -48,7 +45,7 @@ SieveResult::SieveResult(SieveResult &&rhs) noexcept {
 
 Siever::Siever(const mpz_class &N, const mpz_class &a_target, 
         const uint32_t &base_size, const uint32_t &sieve_radius, const uint32_t &partial_prime_bound,
-        const uint32_t &num_critical, const uint32_t &num_noncritical, 
+        const uint32_t &num_critical, //const uint32_t &num_noncritical, 
         const uint32_t &critical_fb_lower, const uint32_t &critical_fb_upper, 
         const std::vector<PrimeSize> &factor_base,
         const std::vector<PrimeSize> &fb_nsqrt, const std::vector<LogType> &fb_logp,
@@ -57,7 +54,7 @@ Siever::Siever(const mpz_class &N, const mpz_class &a_target,
         std::mutex &res_mutex, Timer &timer) :
         N_(N), a_target_(a_target), 
         base_size_(base_size), sieve_radius_(sieve_radius), partial_prime_bound_(partial_prime_bound),
-        num_critical_(num_critical), num_noncritical_(num_noncritical),
+        num_critical_(num_critical), //num_noncritical_(num_noncritical),
         critical_fb_lower_(critical_fb_lower), critical_fb_upper_(critical_fb_upper),
         factor_base_(factor_base), fb_nsqrt_(fb_nsqrt), fb_logp_(fb_logp),
         total_sieved_(total_sieved), 
@@ -137,7 +134,7 @@ void Siever::InitCriticalPrimes() {
     }
 done:
     this->noncritical_fb_idxs_.clear();
-    this->noncritical_fb_idxs_.reserve(this->num_noncritical_);
+    this->noncritical_fb_idxs_.reserve(this->base_size_ - this->num_critical_);
     // get noncritical indexes by testing each for membership in critical_fb_idxs
     // this is slow but num_critical ~ 10, so it doesn't really matter
     for (uint32_t fb_idx = 0; fb_idx < this->base_size_; fb_idx++) {
@@ -146,6 +143,7 @@ done:
             this->noncritical_fb_idxs_.push_back(fb_idx);
         }
     }
+    this->num_noncritical_ = this->noncritical_fb_idxs_.size();
 }
 
 void Siever::InitCriticalDeltas() {
@@ -231,9 +229,8 @@ void Siever::InitNextPoly() {
         this->b_ += (this->crt_indicator_[nu] << 1);
     }
 
-    uint32_t idx = 0;
-    for (const uint32_t noncritical_fb_idx : this->noncritical_fb_idxs_) {
-        const PrimeSize q = this->factor_base_[noncritical_fb_idx];
+    for (uint32_t idx = 0; idx < this->num_noncritical_; idx++) {
+        const PrimeSize q = this->factor_base_[this->noncritical_fb_idxs_[idx]];
         if (gray_code_indicator % 2 == 0) {
             this->soln_[idx].first  = 
                 (this->soln_[idx].first  + this->soln_delta_[idx][nu]) % q;
@@ -245,7 +242,6 @@ void Siever::InitNextPoly() {
             this->soln_[idx].second = 
                 (this->soln_[idx].second + q - this->soln_delta_[idx][nu]) % q;
         }
-        idx++;
     }
     this->poly_++;
 }
@@ -261,14 +257,23 @@ void Siever::SetHeights() {
         const LogType &logq = this->fb_logp_[noncritical_fb_idx];
 
         // We assume that q = 2 is taken care of by the tiny prime bound
-        const std::pair<PrimeSize, PrimeSize> &solns = this->soln_[idx];
+        //const std::pair<PrimeSize, PrimeSize> &solns = this->soln_[idx];
+        const uint32_t min_sol = std::min(this->soln_[idx].first, this->soln_[idx].second),
+                       max_sol = std::max(this->soln_[idx].first, this->soln_[idx].second);
 
-        for (uint32_t x = solns.first; x <= sieve_diameter; x += q) {
+        uint32_t x = min_sol, y = max_sol;
+        for (; y <= sieve_diameter; x += q, y += q) {
+            this->sieve_height_[x] += logq;
+            this->sieve_height_[y] += logq;
+        }
+
+        if (x <= sieve_diameter) this->sieve_height_[x] += logq;
+        /*for (uint32_t x = solns.first; x <= sieve_diameter; x += q) {
             this->sieve_height_[x] += logq;
         }
         for (uint32_t x = solns.second; x <= sieve_diameter; x += q) {
             this->sieve_height_[x] += logq;
-        }
+        }*/
     }
 }
 
@@ -407,12 +412,11 @@ void Siever::CheckHeights() {
                 this->temp_sieve_results_.emplace_back(std::move(rt), 1, sgn, std::move(prime_fb_idxs));
             } else if (polyval.fits_uint_p()
                     && polyval.get_ui() <= this->partial_prime_bound_) {
-
                 // We don't check this, but all partials are going to be primes (or their negations),
                 // simply because our partial_prime_bound_ is not that much (only like 100x) 
                 // bigger than the factor base primes, so anything that small will either be smooth 
                 // or prime
-                uint32_t partial = polyval.get_si();
+                uint32_t partial = polyval.get_ui();
                 
                 InsertPartial(this->temp_sieve_results_, this->temp_partial_sieve_results_, 
                         partial, sgn, rt, prime_fb_idxs);

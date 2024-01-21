@@ -105,7 +105,7 @@ void SieveHandler::InitSievers() {
     // around log(a_target) / log(A_FACTOR_TARGET) critical primes
     // We use ceiling for safety, since if we go smaller there are more primes for us to choose
     this->num_critical_ = ceil(std::log(a_target.get_d()) / std::log(A_FACTOR_TARGET));
-    this->num_noncritical_ = this->base_size_ - this->num_critical_;
+    //this->num_noncritical_ = this->base_size_ - this->num_critical_;
 
     double true_a_target = std::exp(std::log(a_target.get_d()) / this->num_critical_);
     
@@ -122,7 +122,7 @@ void SieveHandler::InitSievers() {
     for (uint32_t t = 0; t < THREADS; t++) {
         this->sievers_.emplace_back(this->N_, a_target, this->base_size_,
                 this->sieve_radius_, this->partial_prime_bound_,
-                this->num_critical_, this->num_noncritical_, 
+                this->num_critical_, //this->num_noncritical_, 
                 this->critical_fb_lower_, this->critical_fb_upper_, 
                 this->factor_base_, this->fb_nsqrt_, this->fb_logp_,
                 this->total_sieved_, this->sieve_results_, this->partial_sieve_results_,
@@ -335,7 +335,7 @@ uint32_t SieveHandler::get_partial_prime_bound_() const { return this->partial_p
 uint32_t SieveHandler::get_results_target_() const { return this->result_target_; }
 
 uint32_t SieveHandler::get_num_critical_() const { return this->num_critical_; }
-uint32_t SieveHandler::get_num_noncritical_() const { return this->num_noncritical_; }
+//uint32_t SieveHandler::get_num_noncritical_() const { return this->num_noncritical_; }
 
 size_t SieveHandler::get_sieve_results_size_() const { return this->sieve_results_.size(); }
 size_t SieveHandler::get_partial_sieve_results_size_() const { return this->partial_sieve_results_.size(); }
