@@ -5,8 +5,9 @@
 #include <chrono>
 #include <cstdint>
 #include <gmpxx.h>
-#include <unordered_map>
+#include <mutex>
 #include <set>
+#include <unordered_map>
 #include <vector>
 
 typedef uint32_t PrimeSize;
@@ -46,6 +47,12 @@ struct SieveResult {
     // Moves
     SieveResult& operator=(SieveResult &&rhs);
     SieveResult(SieveResult &&rhs) noexcept;
+
+    // Notably, a copy constructor is NOT provided 
+    // (there should never be a reason to copy a result instead 
+    // of simply moving it)
+    SieveResult& operator=(const SieveResult &rhs) = delete;
+    SieveResult(const SieveResult &rhs) = delete;
 };
 
 class Siever {
@@ -58,7 +65,7 @@ private:
     const uint32_t partial_prime_bound_;
     
     const uint32_t num_critical_;
-    const uint32_t num_noncritical_;
+    uint32_t num_noncritical_;
     const uint32_t critical_fb_lower_;
     const uint32_t critical_fb_upper_;
 
@@ -70,6 +77,12 @@ private:
 
     std::vector<SieveResult> &sieve_results_;
     std::unordered_map<uint32_t, SieveResult> &partial_sieve_results_;
+
+    // Mutex for safe accessing of the above result objects
+    std::mutex &res_mutex_;
+
+    std::vector<SieveResult> temp_sieve_results_;
+    std::unordered_map<uint32_t, SieveResult> temp_partial_sieve_results_;
 
     uint32_t poly_ = 0;
     mpz_class a_, b_;
@@ -117,10 +130,10 @@ private:
     void SievePoly();
 
     void SetHeights();
+
+    // Checks heights and throws results/partials in temp
     void CheckHeights();
     void CheckSmoothness(const int32_t x, mpz_class &polyval, std::vector<uint32_t> &prime_fb_idxs);
-    void InsertPartial(const uint32_t partial, const bool sgn,
-            const mpz_class &rt, const std::vector<uint32_t> &prime_fb_idxs);
 
     Timer &timer_;
     std::chrono::system_clock::time_point time_prev_;
@@ -129,18 +142,30 @@ private:
     double UpdateTime();
 
 public:
-    explicit Siever(const mpz_class &N, const mpz_class &a_target, 
+    Siever(const mpz_class &N, const mpz_class &a_target, 
             const uint32_t &base_size, const uint32_t &sieve_radius, const uint32_t &large_prime_bound, 
-            const uint32_t &num_critical, const uint32_t &num_noncritical, 
+            const uint32_t &num_critical, //const uint32_t &num_noncritical, 
             const uint32_t &critical_fb_lower, const uint32_t &critical_fb_upper, 
             const std::vector<PrimeSize> &factor_base, 
             const std::vector<PrimeSize> &fb_nsqrt, const std::vector<LogType> &fb_logp,
             uint32_t &total_sieved,
             std::vector<SieveResult> &sieve_results, std::unordered_map<uint32_t, SieveResult> &partial_sieve_results_,
+            std::mutex &res_mutex, 
             Timer &timer);
+
+    Siever() = delete;
+
+    // No copying, default moving
+    Siever(const Siever &rhs) = delete;
+    Siever(Siever &&rhs) = default;
+
 
     // Sieves an entire poly group (chosen randomly) for smooth values
     void SievePolynomialGroup();
+
+    // Flush temp and put the results into the main results
+    // Requires lock
+    void FlushResults();
 };
 
 #endif // SIEVER_HPP_
