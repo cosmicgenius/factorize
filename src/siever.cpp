@@ -22,7 +22,7 @@
 // (~ TINY_PRIME_PADDING) at least to smooth values
 // and thus can be ignored
 const PrimeSize TINY_PRIME_BOUND = 16;
-const double TINY_PRIME_PADDING = 6;
+const double TINY_PRIME_PADDING = 9;
 
 // TODO: does this denom optimization even help?
 SieveResult::SieveResult(const mpz_class &&numer, const mpz_class &&denom, 

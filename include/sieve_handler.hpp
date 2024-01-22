@@ -14,7 +14,9 @@
 
 class SieveHandler {
 private:
-    const mpz_class N_;
+    // true N is the N to be factored, N is the value 
+    // after multiplier
+    mpz_class N_, true_N_ = 0;
     uint32_t base_size_; 
     uint32_t sieve_radius_;
     uint32_t partial_prime_bound_; 
@@ -80,6 +82,8 @@ public:
 
     void GenerateMatrix();
     mpz_class TryExtractDivisor();
+
+    uint32_t get_KS_multiplier_() const;
 
     uint32_t get_base_size_() const;
     uint32_t get_sieve_radius_() const;

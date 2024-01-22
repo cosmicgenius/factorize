@@ -22,7 +22,7 @@
 const double LOG2 = 0.69314718056;
 
 // heuristically obtained 
-const double BASE_SIZE_MULTIPLIER = 0.105;
+const double BASE_SIZE_MULTIPLIER = 0.100;
 const double SIEVE_RADIUS_POWER = 0.725;
 const double SIEVE_RADIUS_MULTIPLIER = 80;
 
@@ -32,13 +32,13 @@ const uint32_t A_FACTOR_TARGET = 3'000;
 
 const uint32_t THREADS = 8;
 
-SieveHandler::SieveHandler(mpz_class N) : N_(N) {}
+SieveHandler::SieveHandler(mpz_class N) : true_N_(N) {}
 
 void SieveHandler::InitHeuristics() {
     std::srand(time(NULL)); // for quick and dirty rand that does not need to be uniform
-                            //
+
     // heuristically obtained approximate base size
-    double ln_n = std::log(this->N_.get_d());
+    double ln_n = std::log(this->true_N_.get_d());
     double approx_base_size = exp(sqrt(ln_n * std::log(ln_n) * BASE_SIZE_MULTIPLIER));
     
     // we want to (Eratosthenes) sieve 
@@ -51,15 +51,35 @@ void SieveHandler::InitHeuristics() {
                  (std::log(2 * approx_base_size) + std::log(std::log(2 * approx_base_size)) - 1));
 
     this->all_small_primes_ = util::primes_less_than(prime_bound);
-    
     this->factor_base_.clear();
-    for (const PrimeSize &p : this->all_small_primes_) {
-        if (p == 2 || mpz_kronecker_ui(this->N_.get_mpz_t(), p) == 1) {
-            factor_base_.push_back(p);
-            //std::cout << p << " ";
+
+    // Find the best Knuth-Schroeppel multiplier k
+    PrimeSize bestk = 0;
+    double best_KS = -1.0;
+    // We require kN = 1 mod 8, i.e. k = N mod 8
+    for (PrimeSize k = mpz_class(this->true_N_ % 8).get_ui(); k < 128; k += 8) {
+        mpz_class kN = this->true_N_ * k;
+
+        double KS_fun = -std::log(k) / 2;
+        for (const PrimeSize &p : this->all_small_primes_) {
+            if (p == 2) continue;
+            if (mpz_kronecker_ui(kN.get_mpz_t(), p) == 1) {
+                if (k % p == 0) KS_fun += std::log(p) / p;
+                else KS_fun += 2.0 * std::log(p) / (p - 1);
+            }
+        }
+        if (KS_fun > best_KS) {
+            best_KS = KS_fun;
+            bestk = k;
         }
     }
-    //std::cout << std::endl;
+
+    this->N_ = bestk * this->true_N_;
+    for (const PrimeSize &p : this->all_small_primes_) {
+        if (p == 2 || mpz_kronecker_ui(this->N_.get_mpz_t(), p) == 1) {
+            this->factor_base_.push_back(p);
+        }
+    }
 
     this->base_size_ = (uint32_t)this->factor_base_.size();
     this->sieve_radius_ = (uint32_t)(pow(this->base_size_, SIEVE_RADIUS_POWER) * SIEVE_RADIUS_MULTIPLIER);
@@ -72,7 +92,7 @@ void SieveHandler::InitHeuristics() {
 
 PrimeSize SieveHandler::CheckSmallPrimes() {
     for (const PrimeSize &p : this->all_small_primes_) {
-        if (this->N_ % p == 0) return p;
+        if (this->true_N_ % p == 0) return p;
     }
     return 1;
 }
@@ -293,16 +313,17 @@ mpz_class SieveHandler::TryExtractDivisor() {
         }
 
         // It seems like this is a worthwhile mod N, but maybe not
-        lhs_denom_rt %= this->N_;
-        rhs_rt %= this->N_;
+        lhs_numer_rt %= this->true_N_;
+        lhs_denom_rt %= this->true_N_;
+        rhs_rt %= this->true_N_;
 
-        mpz_class g = gcd(abs(lhs_numer_rt - lhs_denom_rt * rhs_rt), this->N_);
+        mpz_class g = gcd(abs(lhs_numer_rt - lhs_denom_rt * rhs_rt), this->true_N_);
 
         //if ((lhs_numer_rt * lhs_numer_rt % N_ - lhs_denom_rt * lhs_denom_rt * rhs_rt * rhs_rt % N_ + N_) % N_ != 0)
         //    std::cout << "BAD squares unequal" << std::endl;
 
         std::cout << "g=" << g << std::endl;
-        if (g > 1 && g < this->N_) {
+        if (g > 1 && g < this->true_N_) {
             return g;
         }
 
@@ -327,6 +348,8 @@ mpz_class SieveHandler::TryExtractDivisor() {
 
     return 1;
 }
+ 
+uint32_t SieveHandler::get_KS_multiplier_() const { return mpz_class(this->N_ / this->true_N_).get_ui(); }
 
 uint32_t SieveHandler::get_base_size_() const { return this->base_size_; }
 uint32_t SieveHandler::get_sieve_radius_() const { return this->sieve_radius_; }
