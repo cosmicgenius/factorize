@@ -157,6 +157,7 @@ mpz_class find_nontrivial_factor(const mpz_class &N) {
     std::cout << "Single poly init time: " << timer.init_poly_time << "s" << std::endl;
     std::cout << "Set heights time: " << timer.set_height_time << "s" << std::endl;
     std::cout << "Check heights time: " << timer.check_time << "s" << std::endl;
+    std::cout << "Flush results time: " << timer.flush_time << "s" << std::endl;
     std::cout << "Finding kernel time: " << timer.kernel_time << "s" << std::endl;
     return d;
 }

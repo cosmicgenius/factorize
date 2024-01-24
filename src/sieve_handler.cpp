@@ -22,8 +22,8 @@
 const double LOG2 = 0.69314718056;
 
 // heuristically obtained 
-const double BASE_SIZE_MULTIPLIER = 0.100;
-const double SIEVE_RADIUS_POWER = 0.725;
+const double BASE_SIZE_MULTIPLIER = 0.099;
+const double SIEVE_RADIUS_POWER = 0.7;
 const double SIEVE_RADIUS_MULTIPLIER = 80;
 
 const double PARTIAL_MULTIPLIER = 2'000;
@@ -49,8 +49,10 @@ void SieveHandler::InitHeuristics() {
     // this bound comes from a prime number theorem bound
     uint32_t prime_bound = (uint32_t)(2 * approx_base_size *
                  (std::log(2 * approx_base_size) + std::log(std::log(2 * approx_base_size)) - 1));
-
-    this->all_small_primes_ = util::primes_less_than(prime_bound);
+    
+    // Turn util unsigned ints into signed ints
+    std::vector<uint32_t> uprimes = util::primes_less_than(prime_bound);
+    this->all_small_primes_ = std::vector<PrimeSize>(uprimes.begin(), uprimes.end());
     this->factor_base_.clear();
 
     // Find the best Knuth-Schroeppel multiplier k
@@ -146,13 +148,13 @@ void SieveHandler::InitSievers() {
                 this->critical_fb_lower_, this->critical_fb_upper_, 
                 this->factor_base_, this->fb_nsqrt_, this->fb_logp_,
                 this->total_sieved_, this->sieve_results_, this->partial_sieve_results_,
-                this->res_mutex_, this->timer_);
+                this->res_mutex_);
     }
 }
 
 void RunSiever(Siever &siever, std::mutex &res_mutex,
         std::vector<SieveResult> &sieve_results, 
-        const uint32_t result_target, uint32_t &polygrp,
+        const uint32_t result_target, uint32_t &polygrp, Timer &timer,
         const std::function<void(uint32_t)> &on_finish_polygrp) {
     bool done = false;
     while (!done) {
@@ -166,6 +168,8 @@ void RunSiever(Siever &siever, std::mutex &res_mutex,
         on_finish_polygrp(polygrp);
         polygrp++;
     }
+    
+    timer += siever.get_timer_();
 }
 
 void SieveHandler::Sieve(const std::function<void(uint32_t)> &on_finish_polygrp) {
@@ -175,7 +179,8 @@ void SieveHandler::Sieve(const std::function<void(uint32_t)> &on_finish_polygrp)
         this->threads_.push_back(std::thread(RunSiever, 
                     std::ref(this->sievers_[t]), std::ref(this->res_mutex_), 
                     std::ref(this->sieve_results_), this->result_target_,
-                    std::ref(this->polygroup_), std::cref(on_finish_polygrp)));
+                    std::ref(this->polygroup_), std::ref(this->timer_), 
+                    std::cref(on_finish_polygrp)));
     }
 
     for (std::thread &thr : this->threads_) thr.join();

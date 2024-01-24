@@ -10,12 +10,12 @@
 #include <unordered_map>
 #include <vector>
 
-typedef uint32_t PrimeSize;
+typedef int32_t PrimeSize;
 
 // Fixed point type for storing logs that stores 6
 // bits behind the point in a 16 bit integer.
-const uint16_t LOG_PRECISION = 1 << 6;
-typedef uint16_t LogType;
+typedef uint32_t LogType;
+const LogType LOG_PRECISION = 1 << 12;
 
 struct Timer {
     // We keep track of these times for prof
@@ -23,7 +23,11 @@ struct Timer {
     double init_poly_time = 0;
     double set_height_time = 0;
     double check_time = 0;
+    double flush_time = 0;
     double kernel_time = 0;
+
+    Timer& operator+=(const Timer &rhs);
+    Timer operator+(const Timer &rhs) const;
 };
 
 // Result from sieving, where numer and denom are values such that 
@@ -69,9 +73,9 @@ private:
     const uint32_t critical_fb_lower_;
     const uint32_t critical_fb_upper_;
 
-    const std::vector<PrimeSize> &factor_base_;
-    const std::vector<PrimeSize> &fb_nsqrt_;
-    const std::vector<LogType> &fb_logp_;
+    const std::vector<PrimeSize> factor_base_;
+    const std::vector<PrimeSize> fb_nsqrt_;
+    const std::vector<LogType> fb_logp_;
 
     uint32_t &total_sieved_;
 
@@ -135,23 +139,22 @@ private:
     void CheckHeights();
     void CheckSmoothness(const int32_t x, mpz_class &polyval, std::vector<uint32_t> &prime_fb_idxs);
 
-    Timer &timer_;
+    Timer timer_;
     std::chrono::system_clock::time_point time_prev_;
 
     // Return time from now to time_prev_ and updates time_prev_
     double UpdateTime();
 
 public:
-    Siever(const mpz_class &N, const mpz_class &a_target, 
-            const uint32_t &base_size, const uint32_t &sieve_radius, const uint32_t &large_prime_bound, 
-            const uint32_t &num_critical, //const uint32_t &num_noncritical, 
-            const uint32_t &critical_fb_lower, const uint32_t &critical_fb_upper, 
-            const std::vector<PrimeSize> &factor_base, 
-            const std::vector<PrimeSize> &fb_nsqrt, const std::vector<LogType> &fb_logp,
+    Siever(const mpz_class N, const mpz_class a_target, 
+            const uint32_t base_size, const uint32_t sieve_radius, const uint32_t large_prime_bound, 
+            const uint32_t num_critical, //const uint32_t num_noncritical, 
+            const uint32_t critical_fb_lower, const uint32_t critical_fb_upper, 
+            const std::vector<PrimeSize> factor_base, 
+            const std::vector<PrimeSize> fb_nsqrt, const std::vector<LogType> fb_logp,
             uint32_t &total_sieved,
             std::vector<SieveResult> &sieve_results, std::unordered_map<uint32_t, SieveResult> &partial_sieve_results_,
-            std::mutex &res_mutex, 
-            Timer &timer);
+            std::mutex &res_mutex);
 
     Siever() = delete;
 
@@ -166,6 +169,9 @@ public:
     // Flush temp and put the results into the main results
     // Requires lock
     void FlushResults();
+
+    Timer get_timer_() const;
+    void reset_timer_();
 };
 
 #endif // SIEVER_HPP_
