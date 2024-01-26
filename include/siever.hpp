@@ -2,6 +2,7 @@
 #ifndef SIEVER_HPP_
 #define SIEVER_HPP_
 
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <gmpxx.h>
@@ -22,7 +23,10 @@ struct Timer {
     double init_grp_time = 0;
     double init_poly_time = 0;
     double set_height_time = 0;
+    double wait_res_time = 0;
     double check_time = 0;
+    double trial_divide_time = 0;
+    double insert_time = 0;
     double flush_time = 0;
     double kernel_time = 0;
 
@@ -59,6 +63,31 @@ struct SieveResult {
     SieveResult(const SieveResult &rhs) = delete;
 };
 
+constexpr int POSSIBLE_RES_CACHE_SIZE = 8;
+
+// Possible result tied to a single poly (a, b)
+struct PossibleResult {
+    int32_t x_shift; // The value of x + sieve_radius
+    mpz_class rt; // The value of ax+b
+    mpz_class polyval; // The value of ((ax+b)^2 - N) / a that is being factored, 
+                       // polyval can be destroyed
+    bool sgn; // sgn of (ax+b)^2 - N
+    std::vector<uint32_t> prime_fb_idxs; // populated by prime factors of polyval
+    
+    PossibleResult(const int32_t x_shift, const mpz_class &&rt, const mpz_class &&polyval, 
+            const bool sgn, const std::vector<uint32_t> &&prime_fb_idxs);
+
+    PossibleResult() = default;
+
+    // Moves 
+    PossibleResult& operator=(PossibleResult &&rhs);
+    PossibleResult(PossibleResult &&rhs) noexcept;
+
+    // See above
+    PossibleResult& operator=(const PossibleResult &rhs) = delete;
+    PossibleResult(const PossibleResult &rhs) = delete;
+};
+
 class Siever {
 private:
     const mpz_class N_;
@@ -76,6 +105,7 @@ private:
     const std::vector<PrimeSize> factor_base_;
     const std::vector<PrimeSize> fb_nsqrt_;
     const std::vector<LogType> fb_logp_;
+    const std::vector<std::pair<uint32_t, uint32_t>> fb_magic_num_p_;
 
     uint32_t &total_sieved_;
 
@@ -137,7 +167,10 @@ private:
 
     // Checks heights and throws results/partials in temp
     void CheckHeights();
-    void CheckSmoothness(const int32_t x, mpz_class &polyval, std::vector<uint32_t> &prime_fb_idxs);
+    
+    int cache_size_;
+    std::array<PossibleResult, POSSIBLE_RES_CACHE_SIZE> possible_res_cache_;
+    void CheckPossibleCache();
 
     Timer timer_;
     std::chrono::system_clock::time_point time_prev_;
@@ -152,6 +185,7 @@ public:
             const uint32_t critical_fb_lower, const uint32_t critical_fb_upper, 
             const std::vector<PrimeSize> factor_base, 
             const std::vector<PrimeSize> fb_nsqrt, const std::vector<LogType> fb_logp,
+            const std::vector<std::pair<uint32_t, uint32_t>> fb_magic_num_p,
             uint32_t &total_sieved,
             std::vector<SieveResult> &sieve_results, std::unordered_map<uint32_t, SieveResult> &partial_sieve_results_,
             std::mutex &res_mutex);
@@ -161,7 +195,6 @@ public:
     // No copying, default moving
     Siever(const Siever &rhs) = delete;
     Siever(Siever &&rhs) = default;
-
 
     // Sieves an entire poly group (chosen randomly) for smooth values
     void SievePolynomialGroup();

@@ -21,14 +21,17 @@
 // the idea is that tiny primes are quite wasteful, and contribute mostly uniform heights
 // (~ TINY_PRIME_PADDING) at least to smooth values
 // and thus can be ignored
-const PrimeSize TINY_PRIME_BOUND = 16;
-const double TINY_PRIME_PADDING = 8;
+const PrimeSize TINY_PRIME_BOUND = 64;
+const double TINY_PRIME_PADDING = 12.5;
 
 Timer& Timer::operator+=(const Timer &rhs) {
     this->init_grp_time += rhs.init_grp_time;
     this->init_poly_time += rhs.init_poly_time;
     this->set_height_time += rhs.set_height_time;
+    this->wait_res_time += rhs.wait_res_time;
     this->check_time += rhs.check_time;
+    this->trial_divide_time += rhs.trial_divide_time;
+    this->insert_time += rhs.insert_time;
     this->flush_time += rhs.flush_time;
     this->kernel_time += rhs.kernel_time;
     return *this;
@@ -57,12 +60,31 @@ SieveResult::SieveResult(SieveResult &&rhs) noexcept {
     *this = std::move(rhs);
 }
 
+PossibleResult::PossibleResult(const int32_t x_shift, const mpz_class &&rt, const mpz_class &&polyval, 
+        const bool sgn, const std::vector<uint32_t> &&prime_fb_idxs)
+    : x_shift(x_shift), rt(std::move(rt)), polyval(std::move(polyval)), sgn(sgn), prime_fb_idxs(std::move(prime_fb_idxs)) {}
+
+PossibleResult& PossibleResult::operator=(PossibleResult &&rhs) {
+    if (this != &rhs) {
+        this->x_shift = rhs.x_shift;
+        this->rt = std::move(rhs.rt);
+        this->polyval = std::move(rhs.polyval);
+        this->sgn = rhs.sgn;
+        this->prime_fb_idxs = std::move(rhs.prime_fb_idxs);
+    }
+    return *this;
+}
+PossibleResult::PossibleResult(PossibleResult &&rhs) noexcept {
+    *this = std::move(rhs);
+}
+
 Siever::Siever(const mpz_class N, const mpz_class a_target, 
         const uint32_t base_size, const uint32_t sieve_radius, const uint32_t partial_prime_bound,
         const uint32_t num_critical, //const uint32_t &num_noncritical, 
         const uint32_t critical_fb_lower, const uint32_t critical_fb_upper, 
         const std::vector<PrimeSize> factor_base,
         const std::vector<PrimeSize> fb_nsqrt, const std::vector<LogType> fb_logp,
+        const std::vector<std::pair<uint32_t, uint32_t>> fb_magic_num_p,
         uint32_t &total_sieved,
         std::vector<SieveResult> &sieve_results, std::unordered_map<uint32_t, SieveResult> &partial_sieve_results,
         std::mutex &res_mutex) :
@@ -70,7 +92,7 @@ Siever::Siever(const mpz_class N, const mpz_class a_target,
         base_size_(base_size), sieve_radius_(sieve_radius), partial_prime_bound_(partial_prime_bound),
         num_critical_(num_critical), //num_noncritical_(num_noncritical),
         critical_fb_lower_(critical_fb_lower), critical_fb_upper_(critical_fb_upper),
-        factor_base_(factor_base), fb_nsqrt_(fb_nsqrt), fb_logp_(fb_logp),
+        factor_base_(factor_base), fb_nsqrt_(fb_nsqrt), fb_logp_(fb_logp), fb_magic_num_p_(fb_magic_num_p),
         total_sieved_(total_sieved), 
         sieve_results_(sieve_results), partial_sieve_results_(partial_sieve_results),
         res_mutex_(res_mutex) {
@@ -170,7 +192,7 @@ void Siever::InitCriticalDeltas() {
         // The idea is that product_others * gamma will be a square root 
         // of N mod p, but 0 mod all other critical primes.
         int32_t gamma = this->fb_nsqrt_[critical_fb_idx] 
-                * util::modular_inv_mod_prime(mpz_class(product_others % p).get_ui(), p) % p;
+                * util::modular_inv_mod_prime<int32_t>(mpz_class(product_others % p).get_si(), p) % p;
         if (gamma > p / 2) gamma = p - gamma;
 
         mpz_class indicator = product_others * gamma;
@@ -186,7 +208,7 @@ void Siever::InitCriticalDeltas() {
         const PrimeSize q = this->factor_base_[noncritical_fb_idx];
 
         this->a_inv_[idx] = 
-            util::modular_inv_mod_prime(mpz_class(this->a_ % q).get_ui(), q);
+            util::modular_inv_mod_prime<int32_t>(mpz_class(this->a_ % q).get_si(), q);
         
         this->soln_delta_[idx].resize(this->num_critical_);
         for (crt_idx = 0; crt_idx < this->num_critical_; crt_idx++) {
@@ -301,81 +323,6 @@ void Siever::SetHeights() {
     }
 }
 
-void Siever::CheckSmoothness(const int32_t x, mpz_class &polyval, std::vector<uint32_t> &prime_fb_idxs) {
-    // Remove the ``-1'' prime
-    polyval = abs(polyval);
-
-    // TODO: the original implementation in cosmicgenius/algorithm
-    // trial divides twice, first to check for smoothness, then to 
-    // actually get primes, presumably because there are too many 
-    // false positives/unpaired partials and constructing the 
-    // vector for these is wasteful. Is this justified?
-    
-    // this is slightly inefficient 
-    // (should be possible to simultaneously check for divisibility
-    // and get the quotient if divisible), but we are dividing 
-    // like ~ 10 times, so does it really matter?
-    
-    // This isn't faster
-    // Use raw c impl to be faster
-    // mpz_t n, q, _r, one;
-    // mpz_init(n);
-    // mpz_init(q);
-    // mpz_init(_r);
-    // mpz_init(one);
-    // uint32_t true_res;
-
-    // mpz_set(n, polyval.get_mpz_t());
-    // mpz_set_ui(one, 1);
-
-    // Three separate checks for tiny primes, critical primes, and noncritical primes
-    uint32_t idx = 0;
-    for (const uint32_t &fb_idx : this->noncritical_fb_idxs_) {
-        const PrimeSize p = this->factor_base_[fb_idx];
-        bool divisible = ((x - this->soln_[idx].first ) % p == 0) ||
-                         ((x - this->soln_[idx].second) % p == 0);
-        
-        // Outer check for divisibility
-        while (divisible) {
-        // while (true_res == 0) {
-            // mpz_swap(n, q); 
-            polyval /= p;
-            prime_fb_idxs.push_back(fb_idx);
-            divisible = (polyval % p == 0);
-            // true_res = mpz_fdiv_qr_ui(q, _r, n, p);
-        }
-        if (polyval == 1) return;
-        // if (mpz_cmp(n, one) == 0) goto done_checking;
-        idx++;
-    }
-
-    for (uint32_t fb_idx = 0; fb_idx < this->base_size_; fb_idx++) {
-        const PrimeSize p = this->factor_base_[fb_idx];
-        if (p > TINY_PRIME_BOUND) break;
-        
-        bool divisible = (polyval % p == 0);
-        while (divisible) {
-            polyval /= p;
-            prime_fb_idxs.push_back(fb_idx);
-            divisible = (polyval % p == 0);
-        }
-        if (polyval == 1) return;
-    }
-
-    for (const uint32_t &fb_idx : this->critical_fb_idxs_) {
-        const PrimeSize p = this->factor_base_[fb_idx];
-
-        bool divisible = (polyval % p == 0);
-        while (divisible) {
-            polyval /= p;
-            prime_fb_idxs.push_back(fb_idx);
-            divisible = (polyval % p == 0);
-        }
-        if (polyval == 1) return;
-    }
-
-}
-
 void InsertPartial(std::vector<SieveResult> &sieve_results, 
         std::unordered_map<uint32_t, SieveResult> &partial_sieve_results,
         const uint32_t partial, const bool sgn,
@@ -396,7 +343,6 @@ void InsertPartial(std::vector<SieveResult> &sieve_results,
         // No point moving primitives
         combined_fb_idx.insert(combined_fb_idx.end(), prime_fb_idxs.begin(), prime_fb_idxs.end());
 
-
         // Combine the two partial results into one of the form 
         // (rt1 * rt2) ** 2 = partial ** 2 * (something smooth) mod N
         //
@@ -413,6 +359,158 @@ void InsertPartial(std::vector<SieveResult> &sieve_results,
     }
 }
 
+void Siever::CheckPossibleCache() {
+    std::vector<bool> stop(this->cache_size_, false);
+    // TODO: the original implementation in cosmicgenius/algorithm
+    // trial divides twice, first to check for smoothness, then to 
+    // actually get primes, presumably because there are too many 
+    // false positives/unpaired partials and constructing the 
+    // vector for these is wasteful. Is this justified?
+    
+    // this is slightly inefficient 
+    // (should be possible to simultaneously check for divisibility
+    // and get the quotient if divisible), but we are dividing 
+    // like ~ 10 times, so does it really matter?
+    
+    // This isn't faster
+    /*// Use raw c impl to be faster
+    mpz_t n, q, _r, one;
+    mpz_init(n);
+    mpz_init(q);
+    mpz_init(_r);
+    mpz_init(one);
+    uint32_t true_res; // res as a uint32_t, which is what we care about
+
+    mpz_set(n, polyval.get_mpz_t());
+    mpz_set_ui(one, 1);*/
+
+    // Three separate checks for tiny primes, critical primes, and noncritical primes
+    uint32_t idx = 0;
+    for (const uint32_t &fb_idx : this->noncritical_fb_idxs_) {
+        const PrimeSize p = this->factor_base_[fb_idx];
+        const std::pair<uint32_t, uint32_t> magic_num = this->fb_magic_num_p_[fb_idx];
+
+        for (int i = 0; i < this->cache_size_; i++) {
+            if (stop[i]) continue;
+
+            PossibleResult &pos_res = this->possible_res_cache_[i];
+            /*bool divisible = ((x - this->soln_[idx].first ) % p == 0) ||
+                             ((x - this->soln_[idx].second) % p == 0);*/
+            bool divisible = (static_cast<uint32_t>(std::abs(pos_res.x_shift - this->soln_[idx].first))
+                                * magic_num.first <= magic_num.second) ||
+                             (static_cast<uint32_t>(std::abs(pos_res.x_shift - this->soln_[idx].second))
+                                * magic_num.first <= magic_num.second);
+            
+            while (divisible) {
+                pos_res.polyval /= p;
+                pos_res.prime_fb_idxs.push_back(fb_idx);
+                if (pos_res.polyval == 1) {
+                    stop[i] = true;
+                    break;
+                }
+                divisible = (pos_res.polyval % p == 0);
+            }
+
+            /*// Outer check for divisibility
+            if (divisible) {
+                true_res = 0;
+                mpz_fdiv_q_ui(q, n, p);
+                while (true_res == 0) {
+                    mpz_swap(n, q); 
+                    prime_fb_idxs.push_back(fb_idx);
+                    true_res = mpz_fdiv_qr_ui(q, _r, n, p);
+                }
+            }
+            if (mpz_cmp(n, one) == 0) goto done_checking;*/
+        }
+        idx++;
+    }
+
+    for (uint32_t fb_idx = 0; fb_idx < this->base_size_; fb_idx++) {
+        const PrimeSize p = this->factor_base_[fb_idx];
+        if (p > TINY_PRIME_BOUND) break;
+        
+        for (int i = 0; i < this->cache_size_; i++) {
+            if (stop[i]) continue;
+
+            PossibleResult &pos_res = this->possible_res_cache_[i];
+            bool divisible = (pos_res.polyval % p == 0);
+            
+            while (divisible) {
+                pos_res.polyval /= p;
+                pos_res.prime_fb_idxs.push_back(fb_idx);
+                if (pos_res.polyval == 1) {
+                    stop[i] = true;
+                    break;
+                }
+                divisible = (pos_res.polyval % p == 0);
+            }
+        }
+    }
+
+    for (const uint32_t &fb_idx : this->critical_fb_idxs_) {
+        const PrimeSize p = this->factor_base_[fb_idx];
+
+        for (int i = 0; i < this->cache_size_; i++) {
+            if (stop[i]) continue;
+
+            PossibleResult &pos_res = this->possible_res_cache_[i];
+            bool divisible = (pos_res.polyval % p == 0);
+            
+            while (divisible) {
+                pos_res.polyval /= p;
+                pos_res.prime_fb_idxs.push_back(fb_idx);
+                if (pos_res.polyval == 1) {
+                    stop[i] = true;
+                    break;
+                }
+                divisible = (pos_res.polyval % p == 0);
+            }
+        }
+        /*true_res = mpz_fdiv_qr_ui(q, _r, n, p);
+        while (true_res == 0) {
+            mpz_swap(n, q);
+            prime_fb_idxs.push_back(fb_idx);
+            true_res = mpz_fdiv_qr_ui(q, _r, n, p);
+        }
+        if (mpz_cmp(n, one) == 0) goto done_checking;*/
+    }
+/*done_checking:
+    polyval = mpz_get_ui(n);
+    mpz_clear(n);
+    mpz_clear(q);
+    mpz_clear(_r);
+    mpz_clear(one);*/
+    this->timer_.trial_divide_time += UpdateTime();
+
+    for (int i = 0; i < this->cache_size_; i++) {
+        PossibleResult &pos_res = this->possible_res_cache_[i];
+        if (pos_res.polyval == 1) {
+            pos_res.prime_fb_idxs.insert(pos_res.prime_fb_idxs.end(), 
+                    this->critical_fb_idxs_.begin(), this->critical_fb_idxs_.end());
+            this->temp_sieve_results_.emplace_back(std::move(pos_res.rt), 1, 
+                    pos_res.sgn, std::move(pos_res.prime_fb_idxs));
+        } else if (pos_res.polyval.fits_uint_p()
+                && pos_res.polyval.get_ui() <= this->partial_prime_bound_) {
+            // We don't check this, but all partials are going to be primes (or their negations),
+            // simply because our partial_prime_bound_ is not that much (only like 100x) 
+            // bigger than the factor base primes, so anything that small will either be smooth 
+            // or prime
+            uint32_t partial = pos_res.polyval.get_ui();
+            pos_res.prime_fb_idxs.insert(pos_res.prime_fb_idxs.end(), 
+                    this->critical_fb_idxs_.begin(), this->critical_fb_idxs_.end());
+            
+            InsertPartial(this->temp_sieve_results_, this->temp_partial_sieve_results_, 
+                    partial, pos_res.sgn, pos_res.rt, pos_res.prime_fb_idxs);
+        } 
+        /*else {
+            std::cout << "rejected abs(" << polyval << ") > " << this->partial_prime_bound_ << std::endl;
+        }*/
+    }
+    this->timer_.insert_time += UpdateTime();
+}
+
+
 void Siever::CheckHeights() {
     int32_t sieve_diameter = 2 * this->sieve_radius_;
 
@@ -420,36 +518,57 @@ void Siever::CheckHeights() {
     // We have (ax+b) ** 2 - N = a(a x ** 2 + 2b x + c) for the integer c = (b ** 2 - N) / a
     // We also calculate rt = ax + b for extracting the final square equality mod N
     mpz_class c = (this->b_ * this->b_ - this->N_) / this->a_;
-    for (int32_t x = 0; x <= sieve_diameter; x++) {
-        if (this->sieve_height_[x] > this->sieve_height_target_[x]) {
-            // list of fb indices for primes dividing (ax+b) ** 2 - N, so by default, 
-            // it should contain all of the critical primes 
-            std::vector<uint32_t> prime_fb_idxs(critical_fb_idxs_.begin(), critical_fb_idxs_.end());
 
-            int32_t x_int = x - this->sieve_radius_;
-            mpz_class rt = this->a_ * x_int + this->b_;
-            mpz_class polyval = this->a_ * x_int * x_int + this->b_ * x_int * 2 + c;
-            bool sgn = polyval < 0;
+    for (int32_t x = 0; x <= sieve_diameter;) {
+        this->cache_size_ = 0;
+        while (x <= sieve_diameter) {
+            if (this->sieve_height_[x] > this->sieve_height_target_[x]) {
+                this->timer_.wait_res_time += UpdateTime();
+                int32_t x_int = x - this->sieve_radius_;
 
-            CheckSmoothness(x, polyval, prime_fb_idxs);
+                // We need to set this inline because mpz_class has 
+                // no move constructor >:(
+                PossibleResult &pos_res = this->possible_res_cache_[this->cache_size_++];
+                pos_res.x_shift = x;
+                pos_res.rt = this->a_ * x_int + this->b_;
+                pos_res.polyval = pos_res.rt + this->b_;
+                pos_res.polyval *= x_int;
+                pos_res.polyval += c;
+                /*pos_res.polyval = this->a_;
+                pos_res.polyval *= x_int;
+                pos_res.polyval += this->b_ << 1;
+                pos_res.polyval *= x_int;
+                pos_res.polyval += c; */
+                //pos_res.sgn = (sgn(pos_res.polyval) == -1);
+                pos_res.sgn = pos_res.polyval < 0;
 
-            if (polyval == 1) {
-                this->temp_sieve_results_.emplace_back(std::move(rt), 1, sgn, std::move(prime_fb_idxs));
-            } else if (polyval.fits_uint_p()
-                    && polyval.get_ui() <= this->partial_prime_bound_) {
-                // We don't check this, but all partials are going to be primes (or their negations),
-                // simply because our partial_prime_bound_ is not that much (only like 100x) 
-                // bigger than the factor base primes, so anything that small will either be smooth 
-                // or prime
-                uint32_t partial = polyval.get_ui();
-                
-                InsertPartial(this->temp_sieve_results_, this->temp_partial_sieve_results_, 
-                        partial, sgn, rt, prime_fb_idxs);
-            } 
-            /*else {
-                std::cout << "rejected abs(" << polyval << ") > " << this->partial_prime_bound_ << std::endl;
-            }*/
+                pos_res.polyval = abs(pos_res.polyval);
+
+                //mpz_class rt = this->a_ * x_int + this->b_;
+                //mpz_class polyval = this->a_ * (x_int * x_int) + this->b_ * (x_int << 1) + c;
+                //bool sgn = polyval < 0;
+
+                // list of fb indices for primes dividing (ax+b)^2 - N, so by default, 
+                // it should contain all of the critical primes 
+                //std::vector<uint32_t> prime_fb_idxs;
+                //prime_fb_idxs.reserve(20);
+
+                pos_res.prime_fb_idxs = std::vector<uint32_t>();
+                //this->possible_res_cache_[cache_size].prime_fb_idxs.reserve(20);
+
+                //this->possible_res_cache_.emplace_back(x, std::move(rt), std::move(abs(polyval)), 
+                        //sgn, std::move(prime_fb_idxs));
+
+                this->timer_.check_time += UpdateTime();
+                if (this->cache_size_ == POSSIBLE_RES_CACHE_SIZE) {
+                    x++;
+                    break;
+                }
+            }
+            x++;
         }
+
+        CheckPossibleCache();
     }
 }
 
@@ -457,7 +576,6 @@ void Siever::SievePoly() {
     SetHeights();
     this->timer_.set_height_time += UpdateTime();
     CheckHeights();
-    this->timer_.check_time += UpdateTime();
 }
 
 std::chrono::system_clock::time_point time() {
@@ -467,8 +585,8 @@ std::chrono::system_clock::time_point time() {
 double Siever::UpdateTime() {
     std::chrono::system_clock::time_point time_now = time();
     double res = 
-        std::chrono::duration_cast<std::chrono::microseconds>(time_now - this->time_prev_).count() 
-        / 1'000'000.0;
+        std::chrono::duration_cast<std::chrono::nanoseconds>(time_now - this->time_prev_).count() 
+        / 1'000'000'000.0;
     this->time_prev_ = time_now;
 
     return res;

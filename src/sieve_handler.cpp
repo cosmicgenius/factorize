@@ -16,14 +16,15 @@
 #include <mutex>
 #include <numeric>
 #include <set>
+#include <type_traits>
 #include <unordered_map>
 #include <vector>
 
 const double LOG2 = 0.69314718056;
 
 // heuristically obtained 
-const double BASE_SIZE_MULTIPLIER = 0.099;
-const double SIEVE_RADIUS_POWER = 0.7;
+const double BASE_SIZE_MULTIPLIER = 0.100;
+const double SIEVE_RADIUS_POWER = 0.725;
 const double SIEVE_RADIUS_MULTIPLIER = 80;
 
 const double PARTIAL_MULTIPLIER = 2'000;
@@ -102,6 +103,10 @@ PrimeSize SieveHandler::CheckSmallPrimes() {
 void SieveHandler::PrecomputePrimeFunctions() {
     this->fb_nsqrt_ = std::vector<PrimeSize> (this->base_size_);
     this->fb_logp_ = std::vector<LogType> (this->base_size_);
+    this->fb_magic_num_p_ = std::vector<std::pair<uint32_t, uint32_t>> (this->base_size_);
+
+    static_assert(sizeof(PrimeSize) * 8 <= 32, 
+            "Current implementation requires PrimeSize to be 32 bit.");
 
     for (uint32_t i = 0; i < this->base_size_; i++) {
         const PrimeSize &p = this->factor_base_[i];
@@ -111,6 +116,25 @@ void SieveHandler::PrecomputePrimeFunctions() {
           this->fb_nsqrt_[i] = util::square_root_modulo_prime(this->N_, p);
         } catch (const std::domain_error &err) {
           continue;
+        }
+        
+        // Let p be odd. Then, we can check for divisibility by p as follows:
+        // note that if p | k 2 ^ 32 - 1 for 0 <= k < p, then 
+        // m := (k 2^32 - 1) / p is an integer that fits in uint32_t. 
+        // Furthermore, if n = pq + r, then mn = (k 2^32 - 1)q + mr = mr - q (mod 2^32)
+        // The residue mr (mod 2^32) are roughly spaced like 2^32 r / p, but q is small 
+        // (bounded by (2^32 - 1) / p but generally even smaller than that for small n).
+        // Thus, we must only return true when mr - q is slightly less than 0, 
+        // i.e. -mn <= (2^32 - 1) / p. 
+        //
+        // We store {-m, (2^32 - 1) / p}
+        if (p == 2) {
+            this->fb_magic_num_p_[i] = {1 << 31, 0};
+        } else {
+            uint32_t k = util::modular_inv_mod_prime<int32_t>((static_cast<uint64_t>(1) << 32) % p, p);
+            uint32_t m = ((static_cast<uint64_t>(k) << 32) - 1) / p;
+            uint32_t b = ((static_cast<uint64_t>(1) << 32) - 1) / p;
+            this->fb_magic_num_p_[i] = {-m, b};
         }
     }
 }
@@ -146,7 +170,7 @@ void SieveHandler::InitSievers() {
                 this->sieve_radius_, this->partial_prime_bound_,
                 this->num_critical_, //this->num_noncritical_, 
                 this->critical_fb_lower_, this->critical_fb_upper_, 
-                this->factor_base_, this->fb_nsqrt_, this->fb_logp_,
+                this->factor_base_, this->fb_nsqrt_, this->fb_logp_, this->fb_magic_num_p_,
                 this->total_sieved_, this->sieve_results_, this->partial_sieve_results_,
                 this->res_mutex_);
     }

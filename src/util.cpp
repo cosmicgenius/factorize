@@ -266,19 +266,22 @@ void util::print_prime_fact(const mpz_class &n,
 }
 
 // Extended Euclidean Algorithm
-int32_t util::modular_inv_mod_prime(const int32_t &a, const int32_t &p) {
-    int u = mpz_class(a % p).get_ui(), v = p;
-    int x1 = 1, x2 = 0;
+template<typename T>
+T util::modular_inv_mod_prime(const T &a, const T &p) {
+    static_assert(std::is_signed<T>(), "Given type must be signed for Euclidean Algorithm");
+    T u = a % p, v = p;
+    T x1 = 1, x2 = 0;
 
     while (u != 1) {
-      int q = v / u, r = v % u;
-      int x = x2 - q * x1;
+        T q = v / u, r = v % u;
+        T x = x2 - q * x1;
 
-      v = u;
-      u = r;
-      x2 = x1;
-      x1 = x;
+        v = u;
+        u = r;
+        x2 = x1;
+        x1 = x;
     }
     return (x1 + p) % p;
 }
 
+template int32_t util::modular_inv_mod_prime(const int32_t &a, const int32_t &p);

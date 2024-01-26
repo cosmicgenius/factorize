@@ -27,6 +27,7 @@ private:
     // Store square root of N mod p and log(p) for each p based on fb index
     std::vector<PrimeSize> fb_nsqrt_;
     std::vector<LogType> fb_logp_;
+    std::vector<std::pair<uint32_t, uint32_t>> fb_magic_num_p_;
 
     uint32_t num_critical_;
     //uint32_t num_noncritical_;
