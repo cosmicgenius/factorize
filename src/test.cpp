@@ -5,9 +5,17 @@
 #include <cassert>
 #include <chrono>
 #include <cstdint>
+#include <ctime>
 #include <iostream>
 #include <iomanip>
 #include <vector>
+
+struct Four {
+    uint32_t a;
+    uint32_t b;
+    uint32_t c;
+    uint32_t d;
+};
 
 int main() {
     clock_t tStart = clock();
@@ -196,4 +204,53 @@ int main() {
               << (double)(clock() - tStart) / CLOCKS_PER_SEC << "s"
               << std::endl;
 
+    now = time(NULL);
+    tStart = clock();
+
+    srand(now);
+    constexpr int M = 100'000, rep = 1'000;
+    uint32_t tot1 = 0;
+    std::vector<uint32_t> a(M), b(M), c(M), d(M);
+    //uint32_t a[M], b[M], c[M], d[M];
+    for (int i = 0; i < M; i++) {
+        a[i] = rand();
+        b[i] = rand();
+        c[i] = rand();
+        d[i] = rand();
+    }
+
+    for (int r = 0; r < rep; r++) {
+        for (int i = 0; i < M; i++) {
+            tot1 ^= (a[i] % b[i]) * (c[i] % d[i]);
+            a[i]++;
+            c[i]++;
+        }
+    }
+    std::cout << "separate: " << std::fixed << std::setprecision(3)
+              << (double)(clock() - tStart) / CLOCKS_PER_SEC << "s"
+              << std::endl;
+    tStart = clock();
+
+    srand(now);
+    uint32_t tot2 = 0;
+    std::vector<Four> abcd(M);
+    //Four abcd[M];
+    for (int i = 0; i < M; i++) {
+        abcd[i] = {static_cast<uint32_t>(rand()),
+            static_cast<uint32_t>(rand()),
+            static_cast<uint32_t>(rand()),
+            static_cast<uint32_t>(rand())};
+    }
+
+    for (int r = 0; r < rep; r++) {
+        for (Four &f : abcd) {
+            tot2 ^= (f.a % f.b) * (f.c % f.d);
+            f.a++;
+            f.c++;
+        }
+    }
+    std::cout << "pair: " << std::fixed << std::setprecision(3)
+              << (double)(clock() - tStart) / CLOCKS_PER_SEC << "s"
+              << std::endl;
+    assert(tot1 == tot2);
 }
