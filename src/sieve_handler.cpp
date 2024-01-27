@@ -23,9 +23,10 @@
 const double LOG2 = 0.69314718056;
 
 // heuristically obtained 
-const double BASE_SIZE_MULTIPLIER = 0.100;
-const double SIEVE_RADIUS_POWER = 0.725;
-const double SIEVE_RADIUS_MULTIPLIER = 80;
+const double BASE_SIZE_POWER = 0.125;
+const double BASE_SIZE_MULTIPLIER = 0.5;
+const double SIEVE_RADIUS_POWER = 0.6;
+const double SIEVE_RADIUS_MULTIPLIER = 200;
 
 const double PARTIAL_MULTIPLIER = 2'000;
 
@@ -40,7 +41,7 @@ void SieveHandler::InitHeuristics() {
 
     // heuristically obtained approximate base size
     double ln_n = std::log(this->true_N_.get_d());
-    double approx_base_size = exp(sqrt(ln_n * std::log(ln_n) * BASE_SIZE_MULTIPLIER));
+    double approx_base_size = exp(sqrt(ln_n * std::log(ln_n) * BASE_SIZE_POWER)) * BASE_SIZE_MULTIPLIER;
     
     // we want to (Eratosthenes) sieve 
     // until we have around 2 * approx_base_size primes 
@@ -85,7 +86,8 @@ void SieveHandler::InitHeuristics() {
     }
 
     this->base_size_ = (uint32_t)this->factor_base_.size();
-    this->sieve_radius_ = (uint32_t)(pow(this->base_size_, SIEVE_RADIUS_POWER) * SIEVE_RADIUS_MULTIPLIER);
+    //this->sieve_radius_ = (uint32_t)(pow(this->base_size_, SIEVE_RADIUS_POWER) * SIEVE_RADIUS_MULTIPLIER);
+    this->sieve_radius_ = 100'000;
     this->partial_prime_bound_ = (uint32_t)(PARTIAL_MULTIPLIER * prime_bound);
 
     this->result_target_ = this->base_size_ + uint32_t(ln_n);
