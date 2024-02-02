@@ -23,9 +23,10 @@
 const double LOG2 = 0.69314718056;
 
 // heuristically obtained 
-const double BASE_SIZE_MULTIPLIER = 0.100;
-const double SIEVE_RADIUS_POWER = 0.725;
-const double SIEVE_RADIUS_MULTIPLIER = 80;
+const double BASE_SIZE_POWER = 0.125;
+const double BASE_SIZE_MULTIPLIER = 0.5;
+const double SIEVE_RADIUS_POWER = 0.6;
+const double SIEVE_RADIUS_MULTIPLIER = 200;
 
 const double PARTIAL_MULTIPLIER = 2'000;
 
@@ -40,7 +41,7 @@ void SieveHandler::InitHeuristics() {
 
     // heuristically obtained approximate base size
     double ln_n = std::log(this->true_N_.get_d());
-    double approx_base_size = exp(sqrt(ln_n * std::log(ln_n) * BASE_SIZE_MULTIPLIER));
+    double approx_base_size = exp(sqrt(ln_n * std::log(ln_n) * BASE_SIZE_POWER)) * BASE_SIZE_MULTIPLIER;
     
     // we want to (Eratosthenes) sieve 
     // until we have around 2 * approx_base_size primes 
@@ -85,7 +86,8 @@ void SieveHandler::InitHeuristics() {
     }
 
     this->base_size_ = (uint32_t)this->factor_base_.size();
-    this->sieve_radius_ = (uint32_t)(pow(this->base_size_, SIEVE_RADIUS_POWER) * SIEVE_RADIUS_MULTIPLIER);
+    //this->sieve_radius_ = (uint32_t)(pow(this->base_size_, SIEVE_RADIUS_POWER) * SIEVE_RADIUS_MULTIPLIER);
+    this->sieve_radius_ = 100'000;
     this->partial_prime_bound_ = (uint32_t)(PARTIAL_MULTIPLIER * prime_bound);
 
     this->result_target_ = this->base_size_ + uint32_t(ln_n);
@@ -268,7 +270,7 @@ void SieveHandler::GenerateMatrix() {
         }
     }
 
-    // Get index of fb_idx in relevant_fb_idxs_
+    // Get index of fb_idx in relevant_fb_idxs
     std::unordered_map<uint32_t, uint32_t> fb_idx_rev;
 
     uint32_t idx = 0;
@@ -278,7 +280,7 @@ void SieveHandler::GenerateMatrix() {
 
     const size_t cols = relevant_res_idx_set.size(), 
                  rows = relevant_fb_idx_set.size() + 1;
-    std::vector<std::vector<gf2::Word>> matrix_data;
+    /*std::vector<std::vector<gf2::Word>> matrix_data;
     matrix_data.reserve(cols);
 
     // Generate matrix
@@ -295,7 +297,24 @@ void SieveHandler::GenerateMatrix() {
         matrix_data.push_back(res_vec);
     }
 
-    this->results_matrix_ = gf2::Matrix{cols, rows, matrix_data};
+    this->results_matrix_ = gf2::MatrixCM{cols, rows, matrix_data};*/
+    std::vector<std::vector<uint32_t>> matrix_data(rows);
+    // The -1 prime 
+    matrix_data[0].reserve(relevant_res_idx_set.size() / 2);
+    uint32_t true_res_idx = 0;
+    for (const uint32_t &rel_res_idx : relevant_res_idx_set) {
+        if (this->sieve_results_[rel_res_idx].sgn) matrix_data[0].push_back(true_res_idx);
+
+        std::unordered_map<uint32_t, uint32_t> times_appeared;
+        const SieveResult &result = this->sieve_results_[rel_res_idx];
+
+        for (const uint32_t &fb_idx : result.prime_fb_idxs) times_appeared[fb_idx]++;
+        for (const std::pair<const uint32_t, uint32_t> &pr : times_appeared) {
+            if (pr.second % 2 == 1) matrix_data[fb_idx_rev[pr.first] + 1].push_back(true_res_idx);
+        }
+        true_res_idx++;
+    }
+    this->results_matrix_ = gf2::SparseMatrix{rows, cols, matrix_data};
 
     // Convert to vector for easy indexing into
     //this->relevant_fb_idxs_ = std::vector<uint32_t>(relevant_fb_idx_set.begin(), relevant_fb_idx_set.end());
@@ -307,14 +326,21 @@ mpz_class SieveHandler::TryExtractDivisor() {
     
     const size_t cols = this->results_matrix_.cols;
     std::vector<bool> redundant(cols, false);
-    gf2::Matrix kernel = gf2::nullspace(this->results_matrix_);
+    std::vector<gf2::HalfWord> sub_kernel = gf2::sparse_nullspace(this->results_matrix_);
 
     this->timer_.kernel_time += 
         std::chrono::duration_cast<std::chrono::microseconds>
         (std::chrono::system_clock::now() - tStart).count() 
         / 1'000'000.0;
 
-    for (const std::vector<gf2::Word> &vec : kernel.data) {
+    gf2::HalfWord not_identically_zero = 0;
+    for (uint32_t r = 0; r < sub_kernel.size(); r++) {
+        not_identically_zero |= sub_kernel[r];
+    }
+
+    gf2::HalfWord c_indicator = 1;
+    for (uint32_t c = 0; c < gf2::HALF_BLOCK; c++, c_indicator <<= 1) {
+        if (!(not_identically_zero & c_indicator)) continue;
         // lhs is the value that comes as a product of squares
         // rhs is the square produced from multipyling smooth values
         // TODO: Is mod N faster?
@@ -323,7 +349,8 @@ mpz_class SieveHandler::TryExtractDivisor() {
         std::vector<uint32_t> prime_exp(this->base_size_, 0);
 
         for (uint32_t idx = 0; idx < cols; idx++) {
-            if (vec[idx / gf2::BLOCK] & (gf2::Word(1) << (idx % gf2::BLOCK))) {
+            //if (vec[idx / gf2::BLOCK] & (gf2::Word(1) << (idx % gf2::BLOCK))) {
+            if (sub_kernel[idx] & c_indicator) {
                 // Result should be a part of the product
                 const SieveResult &result = this->sieve_results_[this->relevant_res_idxs_[idx]];
 
@@ -360,14 +387,18 @@ mpz_class SieveHandler::TryExtractDivisor() {
         // (last is faster due to current Gaussian elimination to find nullspace)
         // These redundancies will be deleted later
         for (int res_idx = cols - 1; res_idx >= 0; res_idx--) {
-            if ((vec[res_idx / gf2::BLOCK] & (gf2::Word(1) << (res_idx % gf2::BLOCK)))
-                && !redundant[res_idx]) {
+            //if ((vec[res_idx / gf2::BLOCK] & (gf2::Word(1) << (res_idx % gf2::BLOCK)))
+            if ((sub_kernel[res_idx] & c_indicator) && !redundant[res_idx]) {
                 redundant[res_idx] = true;
             }
         }
     }
 
     // All of the linear dependencies returned trivial divisors
+    //
+    // Ok, technically, we can keep trying, and sparse_nullspace will (likely) 
+    // keep returning kernel vectors, but if they have all been trivial, there 
+    // is likely a problem with the results, so we should deal with it
     for (int res_idx = cols - 1; res_idx >= 0; res_idx--) {
         if (redundant[res_idx]) {
             std::swap(this->sieve_results_[res_idx], this->sieve_results_.back());
@@ -393,7 +424,7 @@ size_t SieveHandler::get_sieve_results_size_() const { return this->sieve_result
 size_t SieveHandler::get_partial_sieve_results_size_() const { return this->partial_sieve_results_.size(); }
 
 std::pair<size_t, size_t> SieveHandler::get_matrix_dim() const { 
-    return {this->results_matrix_.cols, this->results_matrix_.rows}; 
+    return {this->relevant_res_idxs_.size(), this->results_matrix_.rows}; 
 }
 
 Timer SieveHandler::get_timer_() const { return this->timer_; }

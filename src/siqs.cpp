@@ -154,7 +154,8 @@ mpz_class find_nontrivial_factor(const mpz_class &N) {
     Timer timer = sieve_handler.get_timer_();
     std::cout << std::fixed << std::setprecision(3);
     std::cout << "Polygrp init time: " << timer.init_grp_time << "s" << std::endl;
-    std::cout << "Single poly init time: " << timer.init_poly_time << "s" << std::endl;
+    std::cout << "First poly init time: " << timer.init_first_poly_time << "s" << std::endl;
+    std::cout << "Next poly init time: " << timer.init_next_poly_time << "s" << std::endl;
     std::cout << "Set heights time: " << timer.set_height_time << "s" << std::endl;
     std::cout << "Wait for result check time: " << timer.wait_res_time << "s" << std::endl;
     std::cout << "Check heights time: " << timer.check_time << "s" << std::endl;

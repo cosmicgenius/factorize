@@ -47,7 +47,8 @@ private:
     // corresponding to whether the prime appears an odd 
     // number of times in the prime factorization of the 
     // smooth result
-    gf2::Matrix results_matrix_;
+    //gf2::MatrixCM results_matrix_;
+    gf2::SparseMatrix results_matrix_;
 
     // Matrix indices after pruning
     //std::vector<uint32_t> relevant_fb_idxs_; // does not actually need to be stored 

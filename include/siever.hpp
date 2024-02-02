@@ -15,13 +15,14 @@ typedef int32_t PrimeSize;
 
 // Fixed point type for storing logs that stores 6
 // bits behind the point in a 16 bit integer.
-typedef uint32_t LogType;
+typedef int32_t LogType;
 const LogType LOG_PRECISION = 1 << 12;
 
 struct Timer {
     // We keep track of these times for prof
     double init_grp_time = 0;
-    double init_poly_time = 0;
+    double init_first_poly_time = 0;
+    double init_next_poly_time = 0;
     double set_height_time = 0;
     double wait_res_time = 0;
     double check_time = 0;
@@ -138,16 +139,20 @@ private:
     // to (ax + b)^2 = N mod q
     std::vector<PrimeSize> a_inv_;
     std::vector<std::vector<PrimeSize>> soln_delta_;
+    std::vector<std::vector<PrimeSize>> soln_delta_neg_;
     std::vector<std::pair<PrimeSize, PrimeSize>> soln_;
 
     // The value sieve_height[x] will be populated with 
     // the log of the (squarefree) fb-smooth part of 1/a * ((a(x - sieve_radius) + b)^2 - N)
     std::vector<LogType> sieve_height_;
+    std::vector<bool> big_div_; // whether a certain polyval is divisible by a "big" (i.e. > sieve_diameter)
+                                // noncritical prime
 
     // Heights to reach to trigger trial division check for smoothness
     // Value is approximately log|1/a * ((ax)^2 - N)| - log(partial_prime_bound) 
     // ~ log|a * x^2 - N / a| - log(partial_prime_bound) 
-    std::vector<LogType> sieve_height_target_;
+    //std::vector<LogType> sieve_height_target_;
+    LogType sieve_height_target_neg_;
 
     // (Re)chooses critical primes that multiply to a, shared by poly group
     void InitCriticalPrimes();
